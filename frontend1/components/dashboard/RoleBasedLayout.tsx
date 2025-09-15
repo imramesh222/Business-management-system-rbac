@@ -35,7 +35,7 @@ const getNavigationForRole = (role: UserRole) => {
       name: 'Overview', 
       href: role === 'superadmin' ? '/superadmin' : '/organization/dashboard', 
       icon: Home, 
-      current: true 
+      current: false 
     },
   ];
 
@@ -107,6 +107,7 @@ const getNavigationForRole = (role: UserRole) => {
 export function RoleBasedLayout({ children }: RoleBasedLayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const currentUser = getCurrentUserWithFallback();
+  const pathname = typeof window !== 'undefined' ? window.location.pathname : '';
   
   // Show loading state if user is not available
   if (!currentUser) {
@@ -120,7 +121,51 @@ export function RoleBasedLayout({ children }: RoleBasedLayoutProps) {
     );
   }
   
-  const navigation = getNavigationForRole(currentUser.role);
+  // Get navigation items and update current based on pathname
+  const navigation = getNavigationForRole(currentUser.role).map(item => {
+    // Special handling for organization dashboard
+    if (item.href === '/organization/dashboard') {
+      const isOrgDashboard = pathname === '/organization/dashboard' || 
+                          (pathname.startsWith('/organization/') && 
+                          !pathname.startsWith('/organization/members') &&
+                          !pathname.startsWith('/organization/projects') &&
+                          !pathname.startsWith('/organization/billing') &&
+                          !pathname.startsWith('/organization/settings') &&
+                          !pathname.startsWith('/organization/reports'));
+      
+      return {
+        ...item,
+        current: isOrgDashboard
+      };
+    }
+    
+    // Special handling for superadmin dashboard
+    if (item.href === '/superadmin') {
+      const isSuperadminDashboard = pathname === '/superadmin' || 
+                                 (pathname.startsWith('/superadmin/') && 
+                                 !pathname.startsWith('/superadmin/users') &&
+                                 !pathname.startsWith('/superadmin/organizations') &&
+                                 !pathname.startsWith('/superadmin/settings') &&
+                                 !pathname.startsWith('/superadmin/logs') &&
+                                 !pathname.startsWith('/superadmin/reports') &&
+                                 !pathname.startsWith('/superadmin/roles') &&
+                                 !pathname.startsWith('/superadmin/notifications') &&
+                                 !pathname.startsWith('/superadmin/maintenance'));
+      
+      return {
+        ...item,
+        current: isSuperadminDashboard
+      };
+    }
+    
+    // For all other items, use exact or startsWith matching
+    const isActive = pathname === item.href || 
+                    (pathname.startsWith(item.href) && 
+                     item.href !== '/' && 
+                     pathname.charAt(item.href.length) === '/');
+    
+    return { ...item, current: isActive };
+  });
 
   const getRoleColor = (role: UserRole) => {
     const colors: Record<UserRole, string> = {

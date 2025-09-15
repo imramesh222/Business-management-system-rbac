@@ -14,6 +14,9 @@ interface MetricCardProps {
   };
   icon?: React.ReactNode;
   className?: string;
+  // New props for simplified trend display
+  change?: number;
+  changeLabel?: string;
 }
 
 export function MetricCard({ 
@@ -22,8 +25,15 @@ export function MetricCard({
   description, 
   trend, 
   icon,
-  className 
+  className,
+  change,
+  changeLabel
 }: MetricCardProps) {
+  // If change prop is provided, use it to determine trend
+  const derivedTrend = change !== undefined ? {
+    value: `${Math.abs(change)}%`,
+    type: (change > 0 ? 'up' : change < 0 ? 'down' : 'neutral') as TrendType
+  } : trend;
   const getTrendIcon = (type: TrendType) => {
     switch (type) {
       case 'up':
@@ -63,12 +73,12 @@ export function MetricCard({
         {description && (
           <p className="text-xs text-muted-foreground">{description}</p>
         )}
-        {trend && (
-          <div className="mt-2 flex items-center">
-            <span className={cn("text-xs font-medium", getTrendTextClass(trend.type))}>
-              {trend.value}
+        {derivedTrend && (
+          <div className={cn("flex items-center text-sm", getTrendTextClass(derivedTrend.type))}>
+            {getTrendIcon(derivedTrend.type)}
+            <span className="ml-1">
+              {changeLabel || derivedTrend.value}
             </span>
-            {getTrendIcon(trend.type)}
           </div>
         )}
       </CardContent>

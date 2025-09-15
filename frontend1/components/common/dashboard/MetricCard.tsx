@@ -6,15 +6,16 @@ interface MetricCardProps {
   value: string | number;
   icon: React.ReactNode;
   change?: number; // percentage change (can be positive or negative)
+  changeLabel?: string; // Custom label for the change
   description?: string; // Optional description text
   className?: string;
 }
-
 export function MetricCard({ 
   title, 
   value, 
   icon, 
   change, 
+  changeLabel,
   description, 
   className 
 }: MetricCardProps) {
@@ -44,13 +45,15 @@ export function MetricCard({
                   <ArrowDown className="h-4 w-4 mr-1" />
                 )
               )}
-              {isNeutral ? (
-                <span className="flex items-center">
-                  <ArrowRight className="h-4 w-4 mr-1" />
-                  No change
-                </span>
-              ) : (
-                `${Math.abs(change)}% ${isPositive ? 'increase' : 'decrease'}`
+              {changeLabel || (
+                isNeutral ? (
+                  <span className="flex items-center">
+                    <ArrowRight className="h-4 w-4 mr-1" />
+                    No change
+                  </span>
+                ) : (
+                  `${Math.abs(change)}% ${isPositive ? 'increase' : 'decrease'}`
+                )
               )}
             </div>
           )}

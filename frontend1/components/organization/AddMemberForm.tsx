@@ -27,15 +27,13 @@ import { PasswordInput } from '@/components/ui/password-input';
 import { useToast } from '@/hooks/use-toast';
 import { apiPost } from '@/services/apiService';
 import * as z from 'zod';
+import { API_URL } from '@/constant';
 
-type OrganizationRole = 'admin' | 'developer' | 'project_manager' | 'support' | 'verifier' | 'salesperson' | 'client' | 'member';
+type OrganizationRole = 'admin' | 'developer' | 'project_manager' | 'support' | 'verifier' | 'salesperson' | 'user';
 
 const formSchema = z.object({
   email: z.string().email('Please enter a valid email address'),
-  password: z.string().min(8, 'Password must be at least 8 characters'),
-  role: z.enum(['admin', 'developer', 'project_manager', 'support', 'verifier', 'salesperson', 'client', 'member']) as z.ZodType<OrganizationRole>,
-  firstName: z.string().min(1, 'First name is required'),
-  lastName: z.string().min(1, 'Last name is required'),
+  role: z.enum(['admin', 'developer', 'project_manager', 'support', 'verifier', 'salesperson', 'user']) as z.ZodType<OrganizationRole>,
 });
 
 type AddMemberFormProps = {
@@ -52,10 +50,7 @@ export function AddMemberForm({ open, onOpenChange, onSuccess }: AddMemberFormPr
     resolver: zodResolver(formSchema),
     defaultValues: {
       email: '',
-      password: '',
-      role: 'member',
-      firstName: '',
-      lastName: '',
+      role: 'user',
     },
   });
 
@@ -63,18 +58,37 @@ export function AddMemberForm({ open, onOpenChange, onSuccess }: AddMemberFormPr
     try {
       setIsLoading(true);
       
-      // Create the user
-      const response = await apiPost('/users/register/', {
-        email: values.email,
-        password: values.password,
-        first_name: values.firstName,
-        last_name: values.lastName,
-        role: values.role,
+      console.log('Inviting member with data:', values);
+      console.log('Auth token:', localStorage.getItem('access_token'));
+      
+      console.log('Sending request to:', `${API_URL}/org/organizations/invite/`);
+      console.log('Request data:', values);
+      
+      const response = await apiPost(
+        `${API_URL}/org/organizations/invite/`, 
+        values,
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+          },
+          withCredentials: true,
+        }
+      ).catch(error => {
+        console.error('Invitation error details:', {
+          status: error.response?.status,
+          data: error.response?.data,
+          headers: error.response?.headers,
+          config: error.config,
+        });
+        throw error;
       });
+      
+      console.log('Invitation sent successfully, response:', response);
 
       toast({
-        title: 'Success',
-        description: 'Member added successfully',
+        title: 'Invitation Sent',
+        description: 'An invitation has been sent to the provided email address with login instructions.',
       });
 
       onSuccess();
@@ -99,8 +113,7 @@ export function AddMemberForm({ open, onOpenChange, onSuccess }: AddMemberFormPr
     { value: 'support', label: 'Support' },
     { value: 'verifier', label: 'Verifier' },
     { value: 'salesperson', label: 'Salesperson' },
-    { value: 'client', label: 'Client' },
-    { value: 'member', label: 'Member' },
+    { value: 'user', label: 'User' },
   ];
 
   return (
@@ -114,35 +127,6 @@ export function AddMemberForm({ open, onOpenChange, onSuccess }: AddMemberFormPr
         </DialogHeader>
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <FormField
-                control={form.control}
-                name="firstName"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>First Name</FormLabel>
-                    <FormControl>
-                      <Input placeholder="John" {...field} disabled={isLoading} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="lastName"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Last Name</FormLabel>
-                    <FormControl>
-                      <Input placeholder="Doe" {...field} disabled={isLoading} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            </div>
-            
             <FormField
               control={form.control}
               name="email"
@@ -156,20 +140,10 @@ export function AddMemberForm({ open, onOpenChange, onSuccess }: AddMemberFormPr
                 </FormItem>
               )}
             />
-
-            <FormField
-              control={form.control}
-              name="password"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Password</FormLabel>
-                  <FormControl>
-                    <PasswordInput placeholder="••••••••" {...field} disabled={isLoading} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
+            
+            <p className="text-sm text-muted-foreground">
+              An invitation email with login credentials will be sent to this address.
+            </p>
 
             <FormField
               control={form.control}

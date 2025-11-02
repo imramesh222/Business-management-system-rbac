@@ -95,7 +95,7 @@ def send_organization_created_email(self, org_id, context=None):
         logger.info(f"Email context prepared: {context}")
             
         # Render email content with improved subject
-        subject = f"Welcome to {context['site_name']} - Your Organization Account is Ready"
+        subject = f"Welcome to {context['site_name']} - Your BMS Account is Ready"
         
         # Render HTML and text versions
         try:

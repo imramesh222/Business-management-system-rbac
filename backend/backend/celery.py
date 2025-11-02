@@ -27,6 +27,7 @@ app.autodiscover_tasks(packages=[
     'apps.tasks',
     'apps.support',
     'apps.notifications',
+    'apps.dashboard',
 ])
 
 # Configure periodic tasks

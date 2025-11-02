@@ -1,11 +1,13 @@
+import sys
+import logging
+from datetime import timedelta
+
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from django.utils import timezone
-from datetime import timedelta
 from django.db.models import Count, Q, Sum, F
 from django.conf import settings
-import logging
 
 from .permissions import IsSuperAdmin, IsOrganizationAdmin
 
@@ -18,7 +20,17 @@ from apps.clients.models import Client
 from apps.support.models import SupportTicket
 from apps.payments.models import Payment
 
+# Ensure logger is properly configured
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+
+# Add console handler if not already configured
+if not logger.handlers:
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setLevel(logging.DEBUG)
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
 
 class BaseDashboardView(APIView):
     """Base view for all dashboard views with common functionality."""
@@ -100,14 +112,96 @@ class SuperAdminDashboardView(BaseDashboardView):
             time_periods = self.get_time_periods()
             logger.info(f"Time periods: {time_periods}")
             
-            # Get all users and organizations for metrics
-            logger.info("Querying users and organizations...")
-            users = User.objects.all()
+            # Debug: Print to stdout directly as a fallback
+            print("\n=== DEBUG: Starting user query ===")
+            print(f"Current user: {request.user} (superuser: {request.user.is_superuser})")
+            
+            try:
+                # Get all users
+                users_qs = User.objects.all().select_related('profile').order_by('-date_joined')
+                print(f"\n[DEBUG] User Query: {users_qs.query}")
+                
+                # Execute the query
+                users = list(users_qs)
+                print(f"[SUCCESS] Retrieved {len(users)} users from database")
+                
+                # Print user details
+                if users:
+                    print("\n=== USER LIST ===")
+                    for i, user in enumerate(users[:10], 1):
+                        print(f"[{i}] User ID: {user.id}")
+                        print(f"    Email: {user.email}")
+                        print(f"    Active: {user.is_active}")
+                        print(f"    Staff: {user.is_staff}")
+                        print(f"    Superuser: {user.is_superuser}")
+                        print(f"    Last Login: {user.last_login}")
+                        print(f"    Date Joined: {user.date_joined}")
+                    
+                    if len(users) > 10:
+                        print(f"... and {len(users) - 10} more users")
+                else:
+                    print("[WARNING] No users found in the database!")
+                
+                # Also log to file for persistence
+                with open('/tmp/dashboard_debug.log', 'a') as f:
+                    f.write(f"\n=== {timezone.now()} ===\n")
+                    f.write(f"Retrieved {len(users)} users\n")
+                    for user in users[:5]:
+                        f.write(f"- {user.email} (ID: {user.id}, Active: {user.is_active})\n")
+                
+            except Exception as e:
+                print(f"[ERROR] Failed to fetch users: {str(e)}")
+                import traceback
+                traceback.print_exc()
+                users = []
+            
+            print("=== END: User query ===\n")
+            
             orgs = Organization.objects.all()
             
             # Log basic counts
-            logger.info(f"Total users: {users.count()}")
+            total_users = len(users)
+            logger.info(f"Total users in system: {total_users}")
             logger.info(f"Total organizations: {orgs.count()}")
+            
+            # Get all users with their organization memberships
+            from django.db.models import Prefetch
+            from apps.organization.models import OrganizationMember
+            
+            # Prefetch organization memberships for all users
+            users = users.prefetch_related(
+                Prefetch(
+                    'organizationmember_set',
+                    queryset=OrganizationMember.objects.select_related('organization'),
+                    to_attr='memberships'
+                )
+            )
+            
+            # Prepare user data for response
+            user_data = []
+            for user in users:
+                user_orgs = [{
+                    'id': str(member.organization.id),
+                    'name': member.organization.name,
+                    'role': member.role
+                } for member in getattr(user, 'memberships', [])]
+                
+                user_data.append({
+                    'id': str(user.id),
+                    'email': user.email,
+                    'first_name': user.first_name,
+                    'last_name': user.last_name,
+                    'is_active': user.is_active,
+                    'last_login': user.last_login.isoformat() if user.last_login else None,
+                    'date_joined': user.date_joined.isoformat(),
+                    'organizations': user_orgs,
+                    'is_staff': user.is_staff,
+                    'is_superuser': user.is_superuser,
+                    'profile': {
+                        'phone_number': getattr(user.profile, 'phone_number', None),
+                        'avatar': request.build_absolute_uri(user.profile.avatar.url) if hasattr(user, 'profile') and user.profile.avatar else None,
+                    } if hasattr(user, 'profile') else None
+                })
             
             # Calculate metrics with detailed error handling
             try:
@@ -139,16 +233,42 @@ class SuperAdminDashboardView(BaseDashboardView):
                 
                 # Basic metrics that are less likely to fail
                 try:
+                    from django.contrib.auth import get_user_model
+                    from django.db.models import Count, Q
+                    from datetime import datetime, timedelta
+                    
+                    User = get_user_model()
+                    
+                    # Get counts
                     total_orgs = orgs.count()
-                    total_users = users.count()
+                    total_users = User.objects.count()
+                    
+                    # Count active users (logged in within last 30 days)
+                    thirty_days_ago = datetime.now() - timedelta(days=30)
+                    active_users = User.objects.filter(
+                        last_login__gte=thirty_days_ago
+                    ).count()
+                    
+                    # Get member growth (new users in last 30 days)
+                    new_users = User.objects.filter(
+                        date_joined__gte=thirty_days_ago
+                    ).count()
+                    
+                    # Get organization memberships
+                    org_memberships = User.objects.annotate(
+                        org_count=Count('organizations', distinct=True)
+                    ).filter(org_count__gt=0).count()
                     
                     metrics = {
                         'total_organizations': total_orgs,
-                        'total_members': total_users,
+                        'total_members': total_users,  # All users in the system
+                        'active_members': active_users,  # Users active in last 30 days
+                        'organization_members': org_memberships,  # Users with org memberships
+                        'total_projects': Project.objects.count(),
                         'active_projects': active_projects,
                         'monthly_revenue': 0,  # This would come from payment data
                         'team_productivity': 75,  # Example value
-                        'member_growth': member_growth,
+                        'member_growth': new_users,  # New users in last 30 days
                         'project_completion_rate': completion_rate
                     }
                     logger.info(f"Successfully calculated all metrics: {metrics}")
@@ -170,27 +290,35 @@ class SuperAdminDashboardView(BaseDashboardView):
             # Format member activity data
             member_activity = self._get_member_activity(time_periods)
             
-            # Format project status data
-            project_status = self._get_project_status()
+            # Get system health data
+            system_health = self.get_system_health()
             
             # Get recent activities
             recent_activities = self.get_recent_activities()
             
+            # Get projects and team members data if needed
+            projects_data = []  # Populate this if needed
+            team_members_data = []  # Populate this if needed
+            deadlines_data = []  # Populate this if needed
+            
             response_data = {
-                'metrics': {
-                    'total_organizations': metrics['total_organizations'],
-                    'total_members': metrics['total_members'],
-                    'active_projects': metrics['active_projects'],
-                    'monthly_revenue': metrics['monthly_revenue'],
-                    'team_productivity': metrics['team_productivity'],
-                    'member_growth': metrics['member_growth'],
-                    'project_completion_rate': metrics['project_completion_rate']
-                },
-                'member_activity': member_activity,
-                'project_status': project_status,
+                'metrics': metrics,
                 'recent_activities': recent_activities,
-                'timestamp': time_periods['now'].isoformat()
+                'projects': projects_data,
+                'team_members': team_members_data,
+                'upcoming_deadlines': deadlines_data,
+                'member_activity': member_activity,
+                'project_status': self._get_project_status(),
+                'system_health': system_health,
+                'users': user_data,  # Include all users data
+                'total_users': total_users,
+                'last_updated': timezone.now().isoformat()
             }
+            
+            # Log the response size for debugging
+            import json
+            response_size = len(json.dumps(response_data))
+            logger.info(f"Dashboard response size: {response_size} bytes")
             
             return Response(response_data)
             

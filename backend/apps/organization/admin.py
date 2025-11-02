@@ -100,13 +100,39 @@ class OrganizationMemberAdmin(admin.ModelAdmin):
 
 
 class OrganizationAdmin(admin.ModelAdmin):
-    list_display = ('name', 'member_count', 'created_at')
-    search_fields = ('name',)
-    readonly_fields = ('created_at', 'updated_at', 'member_count')
+    list_display = ('name', 'current_plan', 'subscription_status', 'member_count', 'created_at')
+    list_filter = ('status', 'subscription__is_active')
+    search_fields = ('name', 'subscription__plan_duration__plan__name')
+    readonly_fields = ('created_at', 'updated_at', 'member_count', 'current_plan', 'subscription_status', 'subscription_details')
     
     def member_count(self, obj):
         return obj.members.count()
     member_count.short_description = 'Members'
+    
+    def current_plan(self, obj):
+        if hasattr(obj, 'subscription') and obj.subscription:
+            return f"{obj.subscription.plan_duration.plan.name} ({obj.subscription.plan_duration.duration_months} months)"
+        return "No active subscription"
+    current_plan.short_description = 'Current Plan'
+    
+    def subscription_status(self, obj):
+        if hasattr(obj, 'subscription') and obj.subscription:
+            return 'Active' if obj.subscription.is_active else 'Inactive'
+        return 'No subscription'
+    subscription_status.short_description = 'Subscription Status'
+    
+    def subscription_details(self, obj):
+        if hasattr(obj, 'subscription') and obj.subscription:
+            sub = obj.subscription
+            return (
+                f"Plan: {sub.plan_duration.plan.name}\n"
+                f"Duration: {sub.plan_duration.duration_months} months\n"
+                f"Price: ${sub.plan_duration.price}\n"
+                f"Status: {'Active' if sub.is_active else 'Inactive'}\n"
+                f"Period: {sub.start_date} to {sub.end_date}"
+            )
+        return "No subscription details available"
+    subscription_details.short_description = 'Subscription Details'
 
 # Subscription Admin
 class PlanDurationInline(admin.TabularInline):

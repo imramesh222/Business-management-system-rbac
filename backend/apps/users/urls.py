@@ -5,7 +5,20 @@ from rest_framework_simplejwt.views import (
     TokenRefreshView,
     TokenVerifyView,
 )
-from .views import UserRegisterView, UserRoleUpdateView, UserViewSet
+
+# Import views from their respective modules
+from .views import (
+    UserRegisterView, 
+    UserRoleUpdateView, 
+    UserViewSet
+)
+
+# Import auth views from the views package
+from .views.auth_views import (
+    ForgotPasswordView,
+    ResetPasswordView,
+    PasswordResetConfirmView
+)
 from .serializers import CustomTokenObtainPairSerializer
 
 # Define the application namespace
@@ -37,4 +50,9 @@ urlpatterns = [
     
     # Authentication endpoints
     path('auth/', include('rest_framework.urls', namespace='rest_framework')),
+    
+    # Password reset endpoints
+    path('auth/forgot-password/', ForgotPasswordView.as_view(), name='forgot-password'),
+    path('auth/reset-password/', ResetPasswordView.as_view(), name='reset-password'),
+    path('auth/reset-password/confirm/', PasswordResetConfirmView.as_view(), name='password-reset-confirm'),
 ]

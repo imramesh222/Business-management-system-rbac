@@ -2,7 +2,7 @@ import uuid
 from django.db import models
 from django.utils import timezone
 from apps.clients.models import Client
-from apps.organization.models import OrganizationMember
+from apps.organization.models import OrganizationMember, Organization, OrganizationSubscription
 from apps.projects.models import Project
 
 class Payment(models.Model):
@@ -21,6 +21,11 @@ class Payment(models.Model):
         ('bank_transfer', 'Bank Transfer'),
         ('paypal', 'PayPal'),
         ('other', 'Other'),
+    ]
+    
+    PAYMENT_TYPES = [
+        ('project', 'Project Payment'),
+        ('subscription', 'Subscription Payment'),
     ]
     
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -52,11 +57,21 @@ class Payment(models.Model):
         null=True,
         help_text="Transaction ID from payment gateway"
     )
+    payment_type = models.CharField(
+        max_length=20,
+        choices=PAYMENT_TYPES,
+        default='project',
+        help_text="Type of payment (project or subscription)"
+    )
+    
+    # For project payments
     client = models.ForeignKey(
         Client, 
         on_delete=models.CASCADE, 
         related_name='payments',
-        help_text="Client who made the payment"
+        help_text="Client who made the payment",
+        null=True,
+        blank=True
     )
     project = models.OneToOneField(
         Project, 
@@ -66,6 +81,25 @@ class Payment(models.Model):
         null=True,
         blank=True
     )
+    
+    # For subscription payments
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.CASCADE,
+        related_name='subscription_payments',
+        help_text="Organization making the subscription payment",
+        null=True,
+        blank=True
+    )
+    subscription = models.ForeignKey(
+        OrganizationSubscription,
+        on_delete=models.SET_NULL,
+        related_name='payments',
+        help_text="Subscription this payment is for",
+        null=True,
+        blank=True
+    )
+    
     verified = models.BooleanField(
         default=False,
         help_text="Whether the payment has been verified"
@@ -85,7 +119,11 @@ class Payment(models.Model):
     completed_at = models.DateTimeField(null=True, blank=True)
 
     def __str__(self):
-        return f"{self.amount} {self.currency} - {self.get_status_display()} ({self.client.name})"
+        if self.payment_type == 'subscription' and self.organization:
+            return f"{self.amount} {self.currency} - {self.get_status_display()} (Subscription: {self.organization.name})"
+        elif self.client:
+            return f"{self.amount} {self.currency} - {self.get_status_display()} (Project: {self.client.name})"
+        return f"{self.amount} {self.currency} - {self.get_status_display()}"
     
     class Meta:
         ordering = ['-created_at']

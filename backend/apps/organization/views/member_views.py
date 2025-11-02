@@ -1,10 +1,20 @@
-from rest_framework import viewsets, status, permissions, serializers
-from rest_framework.decorators import action
-from rest_framework.response import Response
+import random
+import string
 from django.shortcuts import get_object_or_404
-from django.db.models import Q
+from django.db import transaction
+from django.db.models import Q, Count
+from rest_framework import status, viewsets, permissions, mixins, serializers
+from rest_framework.decorators import action, api_view, permission_classes
+from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated
+from django.contrib.auth import get_user_model
+from django.core.mail import send_mail
+from django.template.loader import render_to_string
+from django.conf import settings
+from django.utils import timezone
+from django.utils.crypto import get_random_string
 
-from apps.organization.models import OrganizationMember, Organization, OrganizationRoleChoices
+from apps.organization.models import Organization, OrganizationMember, OrganizationRoleChoices
 from apps.organization.serializers import (
     OrganizationMemberSerializer,
     OrganizationMemberCreateSerializer,
@@ -12,6 +22,70 @@ from apps.organization.serializers import (
     DeveloperSerializer
 )
 from apps.users.permissions import IsSuperAdmin, IsOrganizationAdmin
+
+def generate_random_password(length=12):
+    """Generate a random password."""
+    chars = string.ascii_letters + string.digits + '!@#$%^&*()'
+    return ''.join(random.choice(chars) for _ in range(length))
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def user_organization_memberships(request, user_id):
+    """Get all organization memberships for a specific user"""
+    try:
+        print(f"[USER_MEMBERSHIPS] Getting memberships for user: {user_id}")
+        
+        # Ensure user can only access their own memberships or admin can access any
+        if str(request.user.id) != str(user_id) and not request.user.is_superuser:
+            # Check if user is admin of any organization where the target user is a member
+            admin_orgs = OrganizationMember.objects.filter(
+                user=request.user,
+                role__in=['admin'],
+                is_active=True
+            ).values_list('organization_id', flat=True)
+            
+            target_user_orgs = OrganizationMember.objects.filter(
+                user_id=user_id,
+                organization_id__in=admin_orgs,
+                is_active=True
+            ).exists()
+            
+            if not target_user_orgs:
+                return Response(
+                    {'error': 'You do not have permission to view this user\'s memberships'}, 
+                    status=status.HTTP_403_FORBIDDEN
+                )
+        
+        memberships = OrganizationMember.objects.filter(
+            user_id=user_id,
+            is_active=True
+        ).select_related('organization', 'user')
+        
+        # Return the membership data
+        data = []
+        for membership in memberships:
+            data.append({
+                'id': str(membership.id),
+                'organization': {
+                    'id': str(membership.organization.id),
+                    'name': membership.organization.name,
+                    'slug': membership.organization.slug,
+                },
+                'role': membership.role,
+                'is_active': membership.is_active,
+                'created_at': membership.created_at.isoformat(),
+                'updated_at': membership.updated_at.isoformat(),
+            })
+        
+        print(f"[USER_MEMBERSHIPS] Found {len(data)} memberships")
+        return Response(data)
+        
+    except Exception as e:
+        print(f"[USER_MEMBERSHIPS] Error: {str(e)}")
+        return Response(
+            {'error': 'Failed to fetch user memberships', 'details': str(e)}, 
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
 
 class OrganizationMemberViewSet(viewsets.ModelViewSet):
     """
@@ -26,7 +100,281 @@ class OrganizationMemberViewSet(viewsets.ModelViewSet):
         'user__first_name', 'user__last_name',
         'organization__name'
     ]
+    
+    @action(detail=True, methods=['get'], url_path='count')
+    def member_count(self, request, pk=None):
+        """
+        Get the total count of active members in the organization.
+        """
+        from django.shortcuts import get_object_or_404
+        from rest_framework.exceptions import NotFound
+        
+        try:
+            # Get the organization using the pk from the URL
+            organization = get_object_or_404(Organization, id=pk)
+            
+            # Count active members in the organization
+            count = OrganizationMember.objects.filter(
+                organization=organization,
+                is_active=True
+            ).count()
+            
+            return Response({
+                'organization_id': str(organization.id),
+                'organization_name': organization.name,
+                'member_count': count
+            })
+            
+        except (ValueError, Organization.DoesNotExist):
+            raise NotFound("Organization not found")
 
+    @action(detail=False, methods=['post'], url_path='invite', 
+            permission_classes=[IsSuperAdmin | IsOrganizationAdmin])
+    def invite_member(self, request):
+        """
+        Invite a new member to the organization by email.
+        Generates a random password and sends an invitation email.
+        """
+        print("\n=== Invite Member Request ===")
+        print(f"Method: {request.method}")
+        print(f"Headers: {dict(request.headers)}")
+        print(f"Request data type: {type(request.data)}")
+        print(f"Request data: {request.data}")
+        print(f"Request user: {request.user}")
+        print(f"Authenticated: {request.user.is_authenticated}")
+        
+        try:
+            # Extract data from request
+            data = request.data.dict() if hasattr(request.data, 'dict') else dict(request.data)
+            print(f"\nParsed data: {data}")
+            
+            email = data.get('email')
+            role = data.get('role', 'user')
+            
+            print(f"Email from request: {email}")
+            print(f"Role from request: {role}")
+            
+            # Normalize role to snake_case
+            if role:
+                role = str(role).replace('-', '_').lower()
+            else:
+                role = 'user'
+                
+            print(f"Normalized role: {role}")
+            
+            # Validate role
+            valid_roles = dict(OrganizationRoleChoices.choices).keys()
+            print(f"Valid roles: {list(valid_roles)}")
+            
+            if not role:
+                print("Role is required")
+                return Response(
+                    {'error': 'Role is required', 'valid_roles': list(valid_roles)},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+                
+            if role not in valid_roles:
+                print(f"Invalid role: {role}. Must be one of: {list(valid_roles)}")
+                return Response(
+                    {
+                        'error': 'Invalid role',
+                        'details': f'"{role}" is not a valid role',
+                        'valid_roles': list(valid_roles),
+                        'received_role': role,
+                        'normalized_role': role.lower().replace('-', '_')
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+                
+            if not email:
+                return Response(
+                    {'error': 'Email is required'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+                
+        except Exception as e:
+            print(f"Error processing request: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return Response(
+                {'error': 'Invalid request data', 'details': str(e)}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+            
+        # Get the organization from the requesting user
+        try:
+            print(f"\nGetting organization for user: {request.user.id} - {request.user.email}")
+            current_member = OrganizationMember.objects.filter(
+                user=request.user,
+                is_active=True
+            ).select_related('organization').first()
+            
+            if not current_member or not hasattr(current_member, 'organization'):
+                print("No active organization membership found for user")
+                return Response(
+                    {'error': 'You are not a member of any organization'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+                
+            organization = current_member.organization
+            print(f"Found organization: {organization.id} - {organization.name}")
+            
+            # Additional permission check - ensure user is admin of this organization
+            if current_member.role not in ['admin', 'super_admin'] and not request.user.is_superuser:
+                print(f"User {request.user.email} does not have admin permissions. Current role: {current_member.role}")
+                return Response(
+                    {'error': 'You do not have permission to invite members to this organization'}, 
+                    status=status.HTTP_403_FORBIDDEN
+                )
+            
+        except Exception as e:
+            print(f"Error getting organization: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return Response(
+                {'error': 'Error processing your organization membership'}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+            
+        # Check if user already exists
+        User = get_user_model()
+        try:
+            user = User.objects.get(email=email)
+            print(f"User with email {email} already exists: {user.id}")
+            
+            # Check if already a member
+            existing_member = OrganizationMember.objects.filter(
+                user=user, 
+                organization=organization
+            ).first()
+            
+            if existing_member:
+                print(f"User is already a member of this organization")
+                return Response(
+                    {'error': 'User is already a member of this organization'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+                
+            # User exists but not in this organization, add them
+            member = OrganizationMember.objects.create(
+                user=user,
+                organization=organization,
+                role=role,
+                is_active=True
+            )
+            print(f"Added existing user to organization: {member.id}")
+            
+            # Send notification email to existing user
+            try:
+                subject = f'You have been added to {organization.name}'
+                message = render_to_string('emails/organization_invitation.html', {
+                    'user': user,
+                    'organization': organization,
+                    'role': role,
+                    'login_url': f'{settings.FRONTEND_URL}/login',
+                })
+                
+                send_mail(
+                    subject=subject,
+                    message='',
+                    from_email=settings.DEFAULT_FROM_EMAIL,
+                    recipient_list=[email],
+                    html_message=message,
+                    fail_silently=False,
+                )
+                print(f"Organization invitation email sent to {email}")
+                
+            except Exception as email_error:
+                print(f"Warning: Failed to send invitation email: {str(email_error)}")
+                
+        except User.DoesNotExist:
+            print(f"Creating new user for email: {email}")
+            
+            # Generate a random username and password
+            username = email.split('@')[0] + '_' + ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
+            password = generate_random_password()
+            
+            try:
+                with transaction.atomic():
+                    # Create the user
+                    user = User.objects.create_user(
+                        username=username,
+                        email=email,
+                        password=password,
+                        is_active=True
+                    )
+                    print(f"Successfully created user: {user.id} - {user.email}")
+                    
+                    # Add user to organization
+                    member = OrganizationMember.objects.create(
+                        user=user,
+                        organization=organization,
+                        role=role,
+                        is_active=True
+                    )
+                    print(f"Successfully created organization member: {member.id}")
+                    
+                    # Send welcome email with credentials
+                    try:
+                        subject = f'Welcome to {organization.name} on ProjectK'
+                        message = render_to_string('emails/welcome_invitation.html', {
+                            'user': user,
+                            'organization': organization,
+                            'email': email,
+                            'password': password,
+                            'login_url': f'{settings.FRONTEND_URL}/login',
+                        })
+                        
+                        send_mail(
+                            subject=subject,
+                            message='',
+                            from_email=settings.DEFAULT_FROM_EMAIL,
+                            recipient_list=[email],
+                            html_message=message,
+                            fail_silently=False,
+                        )
+                        print(f"Welcome email sent to {email}")
+                        
+                    except Exception as email_error:
+                        print(f"Warning: Failed to send welcome email: {str(email_error)}")
+                        # Don't fail the whole process if email fails
+                        
+            except Exception as user_error:
+                print(f"Error creating user and member: {str(user_error)}")
+                import traceback
+                traceback.print_exc()
+                return Response(
+                    {
+                        'error': 'Failed to create user account and organization membership',
+                        'details': str(user_error),
+                        'type': type(user_error).__name__
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        
+        except Exception as e:
+            print(f"Unexpected error in user lookup/creation: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return Response(
+                {
+                    'error': 'Unexpected error processing user',
+                    'details': str(e),
+                    'type': type(e).__name__
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+        
+        return Response(
+            {
+                'message': 'Member invited successfully',
+                'user_id': user.id,
+                'member_id': member.id,
+                'organization': organization.name
+            }, 
+            status=status.HTTP_201_CREATED
+        )
+        
     def get_queryset(self):
         queryset = super().get_queryset()
         

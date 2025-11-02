@@ -10,11 +10,15 @@ class IsSuperAdmin(BasePermission):
         return bool(request.user and request.user.is_superuser)
 
 class IsOrganizationAdmin(BasePermission):
-    """Allows access to organization admins."""
+    """Allows access to organization admins and other roles with dashboard access."""
     def has_permission(self, request, view):
         if not request.user.is_authenticated:
             return False
-        return request.user.role in ['admin', 'superadmin']
+        # Allow access to all roles that have dashboard access
+        return request.user.role in [
+            'superadmin', 'admin', 'project_manager', 'developer', 
+            'salesperson', 'support', 'verifier', 'user'
+        ]
 
 class IsProjectManager(BasePermission):
     """Allows access to project managers."""

@@ -16,13 +16,13 @@ billiard==4.2.1
 vine==5.1.0
 
 # Celery Beat (Scheduler)
-django-celery-beat==4.2.0
+django-celery-beat==2.8.1
 
 # Celery Monitoring
 -e git+https://github.com/mher/flower.git@d6898881a36945ebab86d6f00f1d2d16dbac7b06#egg=flower
 
 # Database
-psycopg2-binary==2.9.9  # PostgreSQL adapter
+psycopg2-binary==2.9.10  # PostgreSQL adapter (Python 3.13 compatible)
 psutil==7.0.0  # System metrics and process utilities
 
 # Image Processing
@@ -37,6 +37,17 @@ drf-yasg==1.21.7  # Yet another Swagger generator
 
 # CORS Headers
 django-cors-headers==4.3.1
+
+# WebSocket Support (Django Channels)
+channels==4.0.0
+channels-redis==4.1.0
+daphne==4.0.0  # ASGI server for Channels
+
+# Filtering
+django-filter==23.5
+
+# Model Utilities
+django-model-utils==4.3.1
 
 # Date/Time Utilities
 python-dateutil==2.9.0.post0

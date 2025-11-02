@@ -1,4 +1,4 @@
-import { apiGet } from './apiService';
+import { apiGet } from '@/lib/api-client';
 import { format, subDays } from 'date-fns';
 
 // Types for dashboard data
@@ -38,41 +38,102 @@ export interface ProjectItem {
   status_color: string;
 }
 
-interface DashboardData {
+export interface OrganizationInfo {
+  id: string;
+  name: string;
+  admin: {
+    name: string;
+    username: string;
+    email: string;
+  };
+}
+
+export interface DashboardData {
   metrics: DashboardMetrics;
   recent_activities: ActivityItem[];
   active_projects: ProjectItem[];
-  // Will add more types for charts and other data
+  organization_info?: OrganizationInfo;
+  // Add these to handle different API response formats
+  organization?: OrganizationInfo;
+  org?: OrganizationInfo;
 }
 
 /**
  * Fetches dashboard data for the organization
  * @param isSuperAdmin Whether the current user is a superadmin
  */
-export const fetchDashboardData = async (isSuperAdmin: boolean = false): Promise<DashboardData> => {
+export const fetchDashboardData = async (isSuperAdmin: boolean = false, organizationId?: string): Promise<DashboardData> => {
   try {
     // Use the appropriate endpoint based on user role
     const endpoint = isSuperAdmin 
       ? '/dashboard/metrics/'  // Superadmin dashboard
       : '/dashboard/admin/overview/';  // Organization admin dashboard
     
-    // Fetch real data from the backend API
-    const response = await apiGet<DashboardData>(endpoint);
+    console.log('Fetching dashboard data from:', endpoint);
+    
+    // Define the response type for the member count endpoint
+    interface MemberCountResponse {
+      organization_id: string;
+      organization_name: string;
+      member_count: number;
+    }
+    
+    // Log the API URL for debugging
+    console.log('API Base URL:', process.env.NEXT_PUBLIC_API_URL);
+    
+    // Log the member count endpoint for debugging
+    const memberCountEndpoint = `org/organizations/${organizationId}/member-count/`;
+    console.log('Member count endpoint:', memberCountEndpoint);
+
+    // Get auth token for the request
+    const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : undefined;
+    
+    // Fetch dashboard data and member count in parallel
+    const [dashboardResponse, memberCountResponse] = await Promise.all([
+      apiGet<DashboardData>(endpoint, { token: token || undefined }),
+      // Only fetch member count if we have an organization ID and token
+      organizationId && token ? apiGet<MemberCountResponse>(
+        `org/organizations/${organizationId}/member-count/`,
+        { token }
+      ).then(response => {
+        console.log('Member count response:', response);
+        return response;
+      }).catch((error) => {
+        console.error('Error fetching member count:', error);
+        return { member_count: 0 } as MemberCountResponse;
+      }) : Promise.resolve({ member_count: 0 } as MemberCountResponse)
+    ]);
+    
+    console.log('Dashboard API response:', dashboardResponse);
+    
+    // Merge member count into metrics if available
+    if (memberCountResponse?.member_count !== undefined) {
+      console.log('Merging member count into metrics:', memberCountResponse.member_count);
+      dashboardResponse.metrics = dashboardResponse.metrics || {};
+      dashboardResponse.metrics.total_members = memberCountResponse.member_count;
+      dashboardResponse.metrics.active_members = memberCountResponse.member_count; // Update active members as well if needed
+      console.log('Updated metrics:', dashboardResponse.metrics);
+    } else {
+      console.log('No member count received from API, using default values');
+    }
+    
+    // Check if organization info is in the response
+    const orgInfo = dashboardResponse.organization_info || dashboardResponse.organization || dashboardResponse.org;
     
     // Transform the response to match our interface if needed
     const data: DashboardData = {
       metrics: {
-        total_members: response.metrics?.total_members || 0,
-        active_members: response.metrics?.active_members || 0,
-        monthly_revenue: response.metrics?.monthly_revenue || 0,
-        tasks_completed: response.metrics?.tasks_completed || 0,
-        team_performance: response.metrics?.team_performance || 0,
-        active_projects: response.metrics?.active_projects || 0,
-        member_growth: response.metrics?.member_growth || 0,
-        revenue_change: response.metrics?.revenue_change || 0,
-        task_completion_rate: response.metrics?.task_completion_rate || 0
+        total_members: dashboardResponse?.metrics?.total_members ?? 0,
+        active_members: dashboardResponse?.metrics?.active_members ?? 0,
+        monthly_revenue: dashboardResponse?.metrics?.monthly_revenue ?? 0,
+        tasks_completed: dashboardResponse?.metrics?.tasks_completed ?? 0,
+        team_performance: dashboardResponse?.metrics?.team_performance ?? 0,
+        active_projects: dashboardResponse?.metrics?.active_projects ?? 0,
+        member_growth: dashboardResponse?.metrics?.member_growth ?? 0,
+        revenue_change: dashboardResponse?.metrics?.revenue_change ?? 0,
+        task_completion_rate: dashboardResponse?.metrics?.task_completion_rate ?? 0
       },
-      recent_activities: (response.recent_activities || []).map(activity => ({
+      recent_activities: ((dashboardResponse as any).recent_activities || []).map((activity: any) => ({
         id: activity.id,
         title: activity.title,
         description: activity.description,
@@ -86,7 +147,8 @@ export const fetchDashboardData = async (isSuperAdmin: boolean = false): Promise
           }
         })
       })),
-      active_projects: (response.active_projects || []).map(project => ({
+      ...(orgInfo && { organization_info: orgInfo }),
+      active_projects: ((dashboardResponse as any).active_projects || []).map((project: any) => ({
         id: project.id,
         name: project.name,
         status: (project.status as 'planning' | 'in_progress' | 'on_hold' | 'completed' | 'cancelled') || 'planning',
@@ -95,7 +157,19 @@ export const fetchDashboardData = async (isSuperAdmin: boolean = false): Promise
         deadline: project.deadline,
         start_date: project.start_date,
         status_color: project.status_color || 'bg-gray-100 text-gray-800'
-      }))
+      })),
+      // Include organization_info if available in response
+      ...(orgInfo && {
+        organization_info: {
+          id: orgInfo.id,
+          name: orgInfo.name,
+          admin: {
+            name: orgInfo.admin?.name || '',
+            username: orgInfo.admin?.username || '',
+            email: orgInfo.admin?.email || ''
+          }
+        }
+      })
     };
     
     return data;

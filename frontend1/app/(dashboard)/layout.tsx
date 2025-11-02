@@ -6,6 +6,7 @@ import { useRouter, usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { ToastProvider } from '@/hooks/use-toast';
 import { Toaster } from '@/components/ui/toaster';
+import { OrganizationProvider } from '@/contexts/OrganizationContext';
 
 // Debug logging helper
 const debug = (message: string, data?: any) => {
@@ -62,9 +63,15 @@ export default function DashboardLayout({
         
         // Define allowed paths based on role
         const allowedPaths: Record<string, string[]> = {
-          'superadmin': ['/superadmin', '/organization/dashboard', '/dashboard'],
-          'admin': ['/organization/dashboard', '/dashboard'],
-          'user': ['/dashboard']
+          'superadmin': ['/superadmin', '/organization', '/dashboard'],
+          'admin': ['/organization', '/dashboard'],
+          'user': ['/dashboard'],
+          // Add other roles with their allowed paths
+          'project_manager': ['/organization/projects', '/dashboard'],
+          'salesperson': ['/organization', '/dashboard'],
+          'verifier': ['/organization', '/dashboard'],
+          'support': ['/organization', '/dashboard'],
+          'developer': ['/organization', '/dashboard']
         };
         
         // Get allowed paths for the user's role, default to dashboard if role not found
@@ -140,10 +147,12 @@ export default function DashboardLayout({
   return (
     <div className="min-h-screen bg-gray-50">
       <ToastProvider>
-        <RoleBasedLayout>
-          {children}
-        </RoleBasedLayout>
-        <Toaster />
+        <OrganizationProvider>
+          <RoleBasedLayout userRole={currentUser?.role}>
+            {children}
+          </RoleBasedLayout>
+          <Toaster />
+        </OrganizationProvider>
       </ToastProvider>
     </div>
   );

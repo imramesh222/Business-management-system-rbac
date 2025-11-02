@@ -60,36 +60,82 @@ export interface FrontendSystemHealth extends Omit<SystemHealth, 'services' | 'd
   };
 }
 
+const defaultSystemHealth: FrontendSystemHealth = {
+  status: 'unhealthy',
+  timestamp: new Date().toISOString(),
+  system: {
+    os: 'Unknown',
+    hostname: 'localhost',
+    python_version: 'unknown'
+  },
+  database: {
+    status: 'disconnected',
+    size: 0,
+    tables: 0
+  },
+  server: {
+    cpu: 0,
+    memory: 0,
+    disk: 0,
+    uptime: '0:00:00'
+  },
+  services: []
+};
+
 export const fetchSystemHealth = async (): Promise<FrontendSystemHealth> => {
   try {
     // Fetch raw system health data from the backend
     const response = await apiGet<SystemHealth>('/dashboard/system/health/');
     
+    if (!response) {
+      console.warn('Empty response from system health endpoint');
+      return defaultSystemHealth;
+    }
+    
     // Transform the response to match our frontend types
     const frontendData: FrontendSystemHealth = {
-      ...response,
+      status: response.status || 'unhealthy',
+      timestamp: response.timestamp || new Date().toISOString(),
+      system: {
+        os: response.system?.os || 'Unknown',
+        hostname: response.system?.hostname || 'localhost',
+        python_version: response.system?.python_version || 'unknown'
+      },
       database: {
-        status: response.database.status === 'connected' ? 'connected' : 'disconnected',
-        size: response.disk.used_gb * 1024 * 1024 * 1024, // Convert GB to bytes
-        tables: response.database.tables
+        status: response.database?.status?.toLowerCase() === 'connected' ? 'connected' : 'disconnected',
+        size: (response.disk?.used_gb || 0) * 1024 * 1024 * 1024, // Convert GB to bytes
+        tables: response.database?.tables || 0
       },
       server: {
-        cpu: response.cpu.usage_percent,
-        memory: response.memory.usage_percent,
-        disk: response.disk.usage_percent,
-        uptime: response.uptime
+        cpu: response.cpu?.usage_percent || 0,
+        memory: response.memory?.usage_percent || 0,
+        disk: response.disk?.usage_percent || 0,
+        uptime: response.uptime || '0:00:00'
       },
-      services: response.services.map(service => ({
-        ...service,
-        status: service.status === 'running' ? 'up' : 'down',
-        responseTime: 0, // Not provided by backend
-        lastChecked: new Date().toISOString()
-      }))
+      services: Array.isArray(response.services) 
+        ? response.services.map(service => ({
+            name: service.name || 'Unknown Service',
+            status: service.status === 'running' ? 'up' : 'down',
+            pid: service.pid,
+            memory_mb: service.memory_mb,
+            responseTime: 0, // Not provided by backend
+            lastChecked: new Date().toISOString()
+          }))
+        : []
     };
     
     return frontendData;
   } catch (error) {
     console.error('Error fetching system health:', error);
-    throw error;
+    // Return default system health instead of throwing
+    return {
+      ...defaultSystemHealth,
+      status: 'unhealthy',
+      timestamp: new Date().toISOString(),
+      system: {
+        ...defaultSystemHealth.system,
+        hostname: 'error'
+      }
+    };
   }
 };

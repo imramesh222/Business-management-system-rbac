@@ -40,7 +40,7 @@ def send_welcome_email_task(self, user_id, password=None, **kwargs):
             has_password = password is not None
         
         # Render email content
-        subject = 'Welcome to Our Platform! - Your Account Details'
+        subject = 'Welcome to BMS Platform ! - Your Account Details'
         
         # Render HTML email template
         html_message = render_to_string('emails/welcome_email.html', {

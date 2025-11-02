@@ -52,7 +52,7 @@ export interface OrganizationActivity {
 }
 
 export interface OrganizationMetrics {
-  totalOrganizations(totalOrganizations: any): import("react").ReactNode;
+  totalOrganizations: number;
   totalMembers: number;
   activeMembers: number;
   totalProjects: number;
@@ -65,9 +65,9 @@ export interface OrganizationMetrics {
   overdueInvoices: number;
   storageUsage: number;
   storageLimit: number;
-  teamProductivity?: number;
-  memberGrowth?: number;
-  projectCompletionRate?: number;
+  teamProductivity: number;
+  memberGrowth: number;
+  projectCompletionRate: number;
   memberActivity: Array<{
     date: string;
     active: number;

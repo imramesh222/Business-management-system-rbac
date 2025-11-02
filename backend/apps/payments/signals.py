@@ -14,14 +14,8 @@ def handle_payment_notifications(sender, instance, created, **kwargs):
         # Process payment asynchronously
         process_payment_async.delay(instance.id)
         
-        # Schedule payment reminder for due date
-        if instance.due_date:
-            # Calculate seconds until due date (for demo, using 1 minute before due)
-            # In production, you might want to schedule this for 1 day before due
-            send_payment_reminder.apply_async(
-                args=[instance.id],
-                eta=instance.due_date
-            )
+        # Note: Payment reminders can be scheduled if needed
+        # For now, we skip this as Payment model doesn't have due_date field
 
 @receiver(pre_save, sender=Payment)
 def log_payment_status_change(sender, instance, **kwargs):

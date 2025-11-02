@@ -147,15 +147,14 @@ urlpatterns = [
     
     # All other API endpoints - user registration is handled in apps/users/urls.py
     path('api/v1/users/', include('apps.users.urls')),  # Includes user registration at /api/v1/users/register/
-    path('api/v1/org/', include('apps.organization.urls')),
+    path('api/v1/org/', include('apps.organization.urls')),  # Organization endpoints
     path('api/v1/clients/', include('apps.clients.urls')),
     path('api/v1/projects/', include('apps.projects.urls')),
     path('api/v1/tasks/', include('apps.tasks.urls')),
     path('api/v1/support/', include('apps.support.urls')),
     path('api/v1/notifications/', include('apps.notifications.urls')),
-    path('api/v1/billing/', include('apps.payments.urls')),
+    path('api/v1/payments/', include('apps.payments.urls')),  # Payment endpoints
     path('api/v1/dashboard/', include('apps.dashboard.urls')),  # Dashboard endpoints
-    path('api/v1/org/', include('apps.organization.urls')),  # Organization endpoints
     
     # Catch-all OPTIONS handler - must come after all other API routes
     re_path(r'^api/v1/.*$', cors_options_view),  # Catch-all for OPTIONS

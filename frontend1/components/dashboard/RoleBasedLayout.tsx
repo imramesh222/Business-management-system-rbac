@@ -44,6 +44,7 @@ const getNavigationForRole = (role: UserRole) => {
     superadmin: [
       { name: 'Users', href: '/superadmin/users', icon: Users, current: false },
       { name: 'Organizations', href: '/superadmin/organizations', icon: Building2, current: false },
+      { name: 'Billing Overview', href: '/superadmin/billing', icon: DollarSign, current: false },
       { name: 'System Settings', href: '/superadmin/settings', icon: Settings, current: false },
       { name: 'Audit Logs', href: '/superadmin/logs', icon: FileText, current: false },
       { name: 'Reports', href: '/superadmin/reports', icon: BarChart3, current: false },
@@ -145,6 +146,7 @@ export function RoleBasedLayout({ children }: RoleBasedLayoutProps) {
                                  (pathname.startsWith('/superadmin/') && 
                                  !pathname.startsWith('/superadmin/users') &&
                                  !pathname.startsWith('/superadmin/organizations') &&
+                                 !pathname.startsWith('/superadmin/billing') &&
                                  !pathname.startsWith('/superadmin/settings') &&
                                  !pathname.startsWith('/superadmin/logs') &&
                                  !pathname.startsWith('/superadmin/reports') &&

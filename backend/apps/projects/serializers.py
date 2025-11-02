@@ -5,6 +5,7 @@ from apps.support.models import SupportTicket
 from apps.clients.models import Client
 from apps.payments.models import Payment
 from apps.users.serializers import UserSerializer
+from apps.organization.models import OrganizationMember
 
 class ClientSerializer(serializers.ModelSerializer):
     class Meta:
@@ -16,17 +17,56 @@ class ClientSerializer(serializers.ModelSerializer):
 class ProjectSerializer(serializers.ModelSerializer):
     """
     Serializer for Project model with primary key relationships.
-    Use the related field names to get detailed information in the API.
+    Handles project manager assignment and validation.
     """
+    project_manager_id = serializers.PrimaryKeyRelatedField(
+        queryset=OrganizationMember.objects.all(),
+        source='project_manager',
+        required=False,
+        allow_null=True,
+        write_only=True
+    )
+    
     class Meta:
         model = Project
         fields = [
-            'id', 'title', 'description', 'cost', 'discount', 
-            'client', 'created_by', 'verifier', 'manager', 
-            'is_verified', 'created_at'
+            'id', 'title', 'description', 'status', 'cost', 'discount', 
+            'start_date', 'deadline', 'client', 'salesperson', 'project_manager',
+            'project_manager_id', 'verifier', 'is_verified', 'created_at', 'updated_at'
         ]
-        read_only_fields = ['id', 'created_at']
+        read_only_fields = ['id', 'created_at', 'updated_at', 'is_verified']
         depth = 1  # Show nested serialization one level deep
+    
+    def validate(self, data):
+        """
+        Validate that the project manager belongs to the same organization as the client.
+        """
+        project_manager = data.get('project_manager')
+        client = data.get('client') or getattr(self.instance, 'client', None)
+        
+        if project_manager and client and project_manager.organization_id != client.organization_id:
+            raise serializers.ValidationError({
+                'project_manager_id': 'Project manager must belong to the same organization as the client.'
+            })
+            
+        return data
+    
+    def to_representation(self, instance):
+        """
+        Custom representation to include project manager details.
+        """
+        representation = super().to_representation(instance)
+        
+        # Add project manager details if exists
+        if instance.project_manager:
+            representation['project_manager'] = {
+                'id': instance.project_manager.id,
+                'name': str(instance.project_manager.user.get_full_name() or instance.project_manager.user.username),
+                'email': instance.project_manager.user.email,
+                'role': instance.project_manager.get_role_display()
+            }
+            
+        return representation
 
 class TaskSerializer(serializers.ModelSerializer):
     """

@@ -43,8 +43,17 @@ const protectedPaths: Record<string, UserRole[]> = {
   // Reports - for admins and superadmins
   '/organization/reports': ['admin', 'superadmin'],
   
-  // User dashboard - for all authenticated users
+  // Main dashboard - for all authenticated users
   '/dashboard': ['user', 'admin', 'superadmin', ...ORG_ROLES],
+  
+  // Role-based dashboards
+  '/user/dashboard': ['user'],
+  '/admin/dashboard': ['admin', 'superadmin'],
+  '/manager/dashboard': ['project_manager'],
+  '/developer/dashboard': ['developer'],
+  '/sales/dashboard': ['salesperson'],
+  '/support/dashboard': ['support'],
+  '/verifier/dashboard': ['verifier'],
   
   // Legacy organization routes (keep for backward compatibility)
   '/projects': ['project_manager', 'admin', 'superadmin'],
@@ -73,6 +82,22 @@ function getBasePath(path: string): string {
   if (parts.length === 1) return `/${parts[0]}`;
   // For other paths, return the first segment
   return `/${parts[0]}`;
+}
+
+// Get the appropriate dashboard path based on user role
+function getDashboardPath(role: string): string {
+  const rolePaths: Record<string, string> = {
+    'superadmin': '/admin/dashboard',
+    'admin': '/admin/dashboard',
+    'project_manager': '/manager/dashboard',
+    'developer': '/developer/dashboard',
+    'salesperson': '/sales/dashboard',
+    'support': '/support/dashboard',
+    'verifier': '/verifier/dashboard',
+    'user': '/user/dashboard'
+  };
+
+  return rolePaths[role] || '/dashboard';
 }
 
 export function middleware(request: NextRequest) {
@@ -187,32 +212,6 @@ export function middleware(request: NextRequest) {
   return NextResponse.next();
 }
 
-function getDashboardPath(role: string): string {
-  console.log('[MIDDLEWARE] Getting dashboard path for role:', role);
-  
-  const normalizedRole = role.toLowerCase() as UserRole;
-  let path = '/';
-  
-  // Handle global roles
-  if (normalizedRole === 'superadmin') {
-    path = '/superadmin';
-  } 
-  // Handle organization admin role
-  else if (normalizedRole === 'admin') {
-    path = '/organization/dashboard';
-  }
-  // Handle all other organization roles
-  else if ((ORG_ROLES as readonly string[]).includes(normalizedRole)) {
-    path = '/organization/dashboard';
-  }
-  // Default for regular users
-  else if (normalizedRole === 'user') {
-    path = '/dashboard';
-  }
-  
-  console.log('[MIDDLEWARE] Resolved dashboard path:', path);
-  return path;
-}
 
 export const config = {
   matcher: [

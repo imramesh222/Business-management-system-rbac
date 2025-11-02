@@ -20,20 +20,14 @@ interface SuperadminDashboardResponse {
   metrics: {
     total_organizations: number;
     total_members: number;
-    active_members?: number;
-    total_projects?: number;
-    active_projects: number;
-    pending_tasks?: number;
-    completed_tasks?: number;
+    active_members: number;
+    active_organizations: number;
     monthly_revenue: number;
-    total_revenue?: number;
-    pending_invoices?: number;
-    overdue_invoices?: number;
-    storage_usage?: number;
-    storage_limit?: number;
-    team_productivity: number;
+    total_revenue: number;
+    new_members: number;
     member_growth: number;
-    project_completion_rate: number;
+    storage_usage: number;
+    storage_limit: number;
   };
   member_activity?: Array<{
     month: string;
@@ -925,9 +919,34 @@ export const fetchOrganizationMembers = async (organizationId: string): Promise<
  */
 export const fetchDashboardData = async (): Promise<OrganizationDashboardData> => {
   try {
-    console.log('Fetching superadmin dashboard data...');
+    console.log('===== FETCHING DASHBOARD DATA =====');
+    console.log('Making API call to /org/dashboard/metrics/');
+    
     const response = await apiGet<SuperadminDashboardResponse>('/org/dashboard/metrics/');
-    console.log('Raw dashboard response:', response);
+    
+    console.log('===== RAW API RESPONSE =====');
+    console.log(JSON.stringify(response, null, 2));
+    
+    if (!response) {
+      console.error('No response received from dashboard API');
+      throw new Error('No response received from dashboard API');
+    }
+    
+    if (!response.metrics) {
+      console.error('No metrics in response:', response);
+      throw new Error('No metrics found in dashboard response');
+    }
+    
+    // Log all metrics for debugging
+    console.log('===== METRICS DATA =====');
+    console.log('Total Organizations:', response.metrics.total_organizations);
+    console.log('Total Members:', response.metrics.total_members);
+    console.log('Active Members:', response.metrics.active_members);
+    console.log('Active Organizations:', response.metrics.active_organizations);
+    console.log('Monthly Revenue:', response.metrics.monthly_revenue);
+    console.log('Total Revenue:', response.metrics.total_revenue);
+    console.log('New Members:', response.metrics.new_members);
+    console.log('Member Growth:', response.metrics.member_growth);
     
     // Use the response directly as it's already typed as SuperadminDashboardResponse
     const data = response;

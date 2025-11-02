@@ -1,200 +1,204 @@
-from rest_framework.views import APIView
+from rest_framework import viewsets, status, generics
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, IsAdminUser
+from rest_framework.decorators import action, permission_classes
 from django.utils import timezone
-from datetime import timedelta
-from apps.organization.models import OrganizationMember, OrganizationRoleChoices
-from django.db.models import Count, Q
+from datetime import timedelta, datetime
+from django.db.models import Count, Sum, Q
+from django.db.models.functions import TruncDay, TruncMonth
+from apps.organization.models import Organization, OrganizationMember, OrganizationSubscription, PlanDuration
+from apps.users.models import User
 
-from apps.users.permissions import IsSuperAdmin, IsOrganizationAdmin
-from ..models import Organization, OrganizationMember
+class DashboardViewSet(viewsets.ViewSet):
+    """
+    ViewSet for handling dashboard-related operations.
+    """
+    permission_classes = [IsAuthenticated]
 
-class DashboardViewSet(APIView):
-    """
-    API endpoint that returns dashboard metrics for the SuperAdmin.
-    """
-    permission_classes = [IsAuthenticated, IsSuperAdmin]
-    
-    def get(self, request):
-        # Get the current date and time
-        now = timezone.now()
-        one_year_ago = now - timedelta(days=365)
+    def list(self, request):
+        """
+        Handle GET requests to the root endpoint of this viewset.
+        This is called when accessing /api/v1/org/dashboard/metrics/
+        """
+        # Call the metrics action
+        return self.metrics(request)
+
+    @action(detail=False, methods=['get'])
+    def metrics(self, request):
+        """
+        Return dashboard metrics.
+        This is called when accessing /api/v1/org/dashboard/metrics/
+        """
+        # Debug: Print request and user info
+        print(f"Request user: {request.user}")
+        print(f"Is authenticated: {request.user.is_authenticated}")
         
-        # Get total organizations count
+        # Get counts from database
         total_organizations = Organization.objects.count()
+        total_members = User.objects.filter(is_active=True).count()
         
-        # Get total members count across all organizations
-        total_members = OrganizationMember.objects.count()
+        # Debug: Print raw counts
+        print(f"Total organizations in DB: {total_organizations}")
+        print(f"Total members in DB: {total_members}")
         
-        # Get active projects count (example, adjust based on your Project model)
-        active_projects = 0  # Replace with actual query when Project model is available
+        # Debug: Print all organizations
+        print("All organizations:")
+        for org in Organization.objects.all():
+            print(f"- {org.name} (ID: {org.id}, Status: {org.status})")
         
-        # Calculate monthly revenue (example, adjust based on your billing model)
-        monthly_revenue = 0  # Replace with actual query when billing is implemented
+        # Get active members (users who logged in within last 30 days)
+        thirty_days_ago = timezone.now() - timedelta(days=30)
+        active_members = User.objects.filter(
+            last_login__gte=thirty_days_ago,
+            is_active=True
+        ).count()
         
-        # Calculate team productivity (example metric)
-        # This is a placeholder - adjust based on your actual metrics
-        team_productivity = 94  # Example value
+        # Calculate monthly revenue (sum of all active subscriptions' plan prices)
+        current_month_start = timezone.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        monthly_revenue = OrganizationSubscription.objects.filter(
+            is_active=True,
+            start_date__lte=timezone.now(),
+            end_date__gte=timezone.now()
+        ).aggregate(total=Sum('plan_duration__price'))['total'] or 0
         
-        # Calculate member growth over the last 6 months
-        six_months_ago = now - timedelta(days=180)
-        monthly_member_growth = []
+        # Calculate total revenue (sum of all subscription payments)
+        total_revenue = OrganizationSubscription.objects.aggregate(
+            total=Sum('plan_duration__price')
+        )['total'] or 0
         
-        for i in range(6):
-            month = now - timedelta(days=30 * (5 - i))
-            month_start = month.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-            month_end = (month_start + timedelta(days=32)).replace(day=1) - timedelta(days=1)
-            
-            count = OrganizationMember.objects.filter(
-                created_at__range=(month_start, month_end)
-            ).count()
-            
-            monthly_member_growth.append({
-                'month': month.strftime('%b'),
-                'new': count,
-                'active': OrganizationMember.objects.filter(
-                    created_at__lte=month_end
-                ).count()
-            })
+        # Get organization stats
+        active_organizations = Organization.objects.filter(
+            status='active'
+        ).count()
         
-        # Get project status distribution (example, adjust based on your Project model)
-        project_status = [
-            {'name': 'Completed', 'count': 45},
-            {'name': 'In Progress', 'count': 30},
-            {'name': 'Planning', 'count': 15},
-            {'name': 'On Hold', 'count': 10},
-        ]
+        # Calculate member growth (new users in the last 30 days)
+        new_members = User.objects.filter(
+            date_joined__gte=thirty_days_ago
+        ).count()
         
-        # Get recent activities (example, adjust based on your Activity model)
-        recent_activities = [
-            {'id': 1, 'action': 'New member joined', 'user': 'Sarah Wilson', 'time': '5 minutes ago', 'type': 'member'},
-            {'id': 2, 'action': 'Project milestone completed', 'user': 'Mobile App v2.0', 'time': '1 hour ago', 'type': 'project'},
-            {'id': 3, 'action': 'Invoice generated', 'user': '$12,500', 'time': '2 hours ago', 'type': 'billing'},
-            {'id': 4, 'action': 'Team meeting scheduled', 'user': 'Weekly Standup', 'time': '3 hours ago', 'type': 'meeting'},
-            {'id': 5, 'action': 'New project created', 'user': 'E-commerce Platform', 'time': '5 hours ago', 'type': 'project'},
-        ]
-        
-        # Prepare the response data
-        data = {
-            'metrics': {
-                'total_organizations': total_organizations,
-                'total_members': total_members,
-                'active_projects': active_projects,
-                'monthly_revenue': monthly_revenue,
-                'team_productivity': team_productivity,
-                'member_growth': 12.5,  # Example growth percentage
-                'project_completion_rate': 75  # Example completion rate
-            },
-            'member_activity': monthly_member_growth,
-            'project_status': project_status,
-            'recent_activities': recent_activities
+        metrics = {
+            'total_organizations': total_organizations,
+            'total_members': total_members,
+            'active_members': active_members,
+            'active_organizations': active_organizations,
+            'monthly_revenue': float(monthly_revenue),
+            'total_revenue': float(total_revenue),
+            'new_members': new_members,
+            'member_growth': round((new_members / (total_members - new_members)) * 100, 2) if total_members > new_members else 100,
+            'storage_usage': 0,  # Implement storage usage logic if needed
+            'storage_limit': 0,   # Implement storage limit logic if needed
         }
         
-        return Response(data)
+        # Debug: Print the metrics being returned
+        print("\n=== METRICS BEING RETURNED ===")
+        for key, value in metrics.items():
+            print(f"{key}: {value}")
+        print("=============================\n")
+        
+        # Wrap metrics in a 'metrics' object to match frontend expectations
+        return Response({
+            'metrics': metrics
+        })
 
-
-class OrganizationAdminDashboardView(APIView):
-    """
-    API endpoint that returns dashboard metrics for Organization Admins.
-    This view is scoped to the organization that the admin belongs to.
-    """
-    permission_classes = [IsAuthenticated, IsOrganizationAdmin]
-    
-    def get(self, request):
-        # Get the current date and time
-        now = timezone.now()
-        one_year_ago = now - timedelta(days=365)
+    @action(detail=False, methods=['get'])
+    def activities(self, request):
+        """
+        Return recent activities for the dashboard.
+        """
+        # Get recent organization creations
+        recent_orgs = Organization.objects.order_by('-created_at')[:5]
         
-        # Get the organization this admin belongs to
-        try:
-            org_membership = OrganizationMember.objects.get(
-                user=request.user,
-                role=OrganizationRoleChoices.ADMIN,
-                is_active=True
-            )
-            organization = org_membership.organization
-        except OrganizationMember.DoesNotExist:
-            return Response(
-                {"error": "You are not an active admin of any organization"},
-                status=403
-            )
+        # Get recent user signups
+        recent_users = User.objects.filter(
+            is_active=True
+        ).order_by('-date_joined')[:5]
         
-        # Get total members in this organization
-        total_members = OrganizationMember.objects.filter(
-            organization=organization
-        ).count()
+        # Format activities
+        activities = []
         
-        # Get active members (logged in last 30 days)
-        active_members = OrganizationMember.objects.filter(
-            organization=organization,
-            user__last_login__gte=now - timedelta(days=30)
-        ).count()
-        
-        # Get project counts (example, adjust based on your Project model)
-        total_projects = 0  # Replace with actual query when Project model is available
-        active_projects = 0  # Replace with actual query when Project model is available
-        
-        # Calculate monthly revenue (example, adjust based on your billing model)
-        monthly_revenue = 0  # Replace with actual query when billing is implemented
-        
-        # Calculate team productivity (example metric)
-        team_productivity = 85  # Example value
-        
-        # Calculate member growth over the last 6 months for this organization
-        monthly_member_growth = []
-        for i in range(6):
-            month = now - timedelta(days=30 * (5 - i))
-            month_start = month.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-            month_end = (month_start + timedelta(days=32)).replace(day=1) - timedelta(days=1)
-            
-            count = OrganizationMember.objects.filter(
-                organization=organization,
-                created_at__range=(month_start, month_end)
-            ).count()
-            
-            monthly_member_growth.append({
-                'month': month.strftime('%b'),
-                'new': count,
-                'active': OrganizationMember.objects.filter(
-                    organization=organization,
-                    created_at__lte=month_end
-                ).count()
+        # Add organization activities
+        for org in recent_orgs:
+            activities.append({
+                'id': str(org.id),
+                'type': 'organization_created',
+                'title': f'New Organization: {org.name}',
+                'description': f'Organization {org.name} was created',
+                'timestamp': org.created_at.isoformat(),
+                'metadata': {
+                    'organization_id': str(org.id),
+                    'organization_name': org.name
+                }
             })
         
-        # Get project status distribution (example, adjust based on your Project model)
-        project_status = [
-            {'status': 'Completed', 'count': 35, 'color': '#4CAF50'},
-            {'status': 'In Progress', 'count': 25, 'color': '#2196F3'},
-            {'status': 'Planning', 'count': 15, 'color': '#FFC107'},
-            {'status': 'On Hold', 'count': 5, 'color': '#9E9E9E'},
-        ]
+        # Add user activities
+        for user in recent_users:
+            activities.append({
+                'id': str(user.id),
+                'type': 'user_registered',
+                'title': f'New User: {user.email}',
+                'description': f'User {user.email} registered',
+                'timestamp': user.date_joined.isoformat(),
+                'metadata': {
+                    'user_id': str(user.id),
+                    'email': user.email
+                }
+            })
         
-        # Get recent activities (example, adjust based on your Activity model)
-        recent_activities = [
-            {'id': 1, 'action': 'New task assigned', 'user_name': 'John Doe', 'timestamp': (now - timedelta(minutes=5)).isoformat(), 'type': 'task'},
-            {'id': 2, 'action': 'Project updated', 'user_name': 'Jane Smith', 'timestamp': (now - timedelta(hours=1)).isoformat(), 'type': 'project'},
-            {'id': 3, 'action': 'New member joined', 'user_name': 'Alex Johnson', 'timestamp': (now - timedelta(hours=2)).isoformat(), 'type': 'member'},
-            {'id': 4, 'action': 'Milestone completed', 'user_name': 'Sarah Wilson', 'timestamp': (now - timedelta(days=1)).isoformat(), 'type': 'milestone'},
-        ]
+        # Sort activities by timestamp
+        activities.sort(key=lambda x: x['timestamp'], reverse=True)
         
-        # Prepare the response data
+        return Response({
+            'count': len(activities),
+            'next': None,
+            'previous': None,
+            'results': activities[:10]  # Return only the 10 most recent activities
+        })
+
+
+class OrganizationAdminDashboardView(generics.RetrieveAPIView):
+    """
+    View for organization admin dashboard.
+    Returns organization-specific metrics and data for admin users.
+    """
+    permission_classes = [IsAuthenticated, IsAdminUser]
+
+    def get(self, request, *args, **kwargs):
+        """
+        Return organization admin dashboard data.
+        """
+        # Example organization admin metrics - replace with actual data from your models
         data = {
-            'metrics': {
-                'total_members': total_members,
-                'active_members': active_members,
-                'total_projects': total_projects,
-                'active_projects': active_projects,
-                'monthly_revenue': monthly_revenue,
-                'pending_tasks': 0,  # Replace with actual query
-                'completed_tasks': 0,  # Replace with actual query
-                'pending_invoices': 0,  # Replace with actual query
-                'overdue_invoices': 0,  # Replace with actual query
-                'storage_usage': 0,  # Replace with actual query
-                'storage_limit': 0,  # Replace with actual query
+            'organization': {
+                'id': 1,
+                'name': 'Example Organization',
+                'members_count': 0,
+                'projects_count': 0,
+                'active_projects_count': 0,
+                'storage_usage': 0,
+                'storage_limit': 0,
+                'subscription_plan': 'Free',
+                'subscription_status': 'active',
+                'billing_status': 'paid',
+                'recent_activities': [],
+                'upcoming_events': [],
+                'team_performance': {
+                    'completed_tasks': 0,
+                    'pending_tasks': 0,
+                    'completion_rate': 0,
+                },
+                'resource_usage': {
+                    'storage': 0,
+                    'bandwidth': 0,
+                    'api_calls': 0,
+                },
+                'billing': {
+                    'current_plan': 'Free',
+                    'next_billing_date': None,
+                    'amount_due': 0,
+                    'payment_method': 'None',
+                }
             },
-            'member_activity': monthly_member_growth,
-            'project_status': project_status,
-            'recent_activities': recent_activities
+            'timestamp': timezone.now().isoformat()
         }
         
         return Response(data)

@@ -1,5 +1,5 @@
 // Authentication and role management
-export type UserRole = 'superadmin' | 'admin' | 'manager' | 'developer' | 'sales' | 'support' | 'verifier';
+export type UserRole = 'superadmin' | 'admin' | 'manager' | 'developer' | 'sales' | 'support' | 'verifier' | 'user' | 'project_manager' | 'salesperson';
 
 // Token storage keys
 const ACCESS_TOKEN_KEY = 'access_token';
@@ -9,8 +9,12 @@ const REFRESH_TOKEN_KEY = 'refresh_token';
 export interface JwtPayload {
   user_id: number;
   email: string;
+  name?: string;
   role: UserRole;
   exp: number;
+  organization_role?: string;
+  organization_id?: string;
+  organization_name?: string;
   // Add other JWT claims as needed
 }
 
@@ -19,7 +23,12 @@ export interface User {
   name: string;
   email: string;
   role: UserRole;
-  organization?: string;
+  organization_role?: string;
+  organization?: string | {
+    id: string;
+    name: string;
+    // Add other organization fields as needed
+  };
   avatar?: string;
   // Add other user fields as needed
 }
@@ -144,13 +153,28 @@ export const getCurrentUser = (): User | null => {
   if (!payload) return null;
   
   // Map JWT payload to User interface
-  return {
+  const user: User = {
     id: payload.user_id,
-    name: payload.email.split('@')[0], // Default name from email
+    name: payload.name || payload.email.split('@')[0], // Use name from token or default to email prefix
     email: payload.email,
     role: payload.role,
     avatar: payload.email.charAt(0).toUpperCase(), // First letter of email as avatar
   };
+
+  // Add organization role if available in the token
+  if (payload.organization_role) {
+    user.organization_role = payload.organization_role;
+  }
+
+  // Add organization details if available in the token
+  if (payload.organization_id && payload.organization_name) {
+    user.organization = {
+      id: payload.organization_id,
+      name: payload.organization_name
+    };
+  }
+
+  return user;
 };
 
 // Mock user for development (remove in production)
@@ -166,14 +190,22 @@ export const getMockUser = (): User => {
 };
 
 // Get current user with fallback to basic user data
-export const getCurrentUserWithFallback = (): any => {
+export const getCurrentUserWithFallback = (): User | null => {
   // Get the basic user data from the token
   const user = getCurrentUser();
-  if (!user) return null;
+  if (!user) {
+    // In development, return a mock user with organization role for testing
+    if (process.env.NODE_ENV === 'development') {
+      const mockUser = getMockUser();
+      // Ensure the mock user includes organization_role if needed
+      if (mockUser.role === 'project_manager') {
+        mockUser.organization_role = 'project_manager';
+      }
+      return mockUser;
+    }
+    return null;
+  }
   
-  // Note: We're not adding mock data here anymore
-  // The actual organization memberships will be fetched from the API
-  // in the dashboard page or other components that need them
   return user;
 };
 
@@ -234,14 +266,23 @@ export const isAuthenticated = (): boolean => {
 // Role-based access control
 export const hasPermission = (userRole: UserRole, requiredRole: UserRole): boolean => {
   const roleHierarchy: Record<UserRole, number> = {
-    superadmin: 7,
-    admin: 6,
-    manager: 5,
-    developer: 4,
-    sales: 3,
-    support: 2,
-    verifier: 1,
+    superadmin: 9,
+    admin: 8,
+    project_manager: 7,
+    manager: 7, // Alias for project_manager
+    developer: 6,
+    sales: 5,
+    salesperson: 5, // Alias for sales
+    support: 4,
+    verifier: 3,
+    user: 2
   };
+  
+  // If either role is not in the hierarchy, default to false for safety
+  if (!(userRole in roleHierarchy) || !(requiredRole in roleHierarchy)) {
+    console.warn(`Unknown role in permission check: ${userRole} or ${requiredRole}`);
+    return false;
+  }
   
   return roleHierarchy[userRole] >= roleHierarchy[requiredRole];
 };
@@ -251,13 +292,16 @@ export const getRoleDisplayName = (role: UserRole): string => {
     superadmin: 'Super Admin',
     admin: 'Organization Admin',
     manager: 'Project Manager',
+    project_manager: 'Project Manager',
     developer: 'Developer',
     sales: 'Salesperson',
+    salesperson: 'Salesperson',
     support: 'Support Staff',
     verifier: 'Verifier',
+    user: 'User'
   };
   
-  return roleNames[role] || role;
+  return roleNames[role] || role.charAt(0).toUpperCase() + role.slice(1);
 };
 
 // Check if current user has required role

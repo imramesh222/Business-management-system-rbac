@@ -6,6 +6,7 @@ import { useRouter, usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { ToastProvider } from '@/hooks/use-toast';
 import { Toaster } from '@/components/ui/toaster';
+import { OrganizationProvider } from '@/contexts/OrganizationContext';
 
 // Debug logging helper
 const debug = (message: string, data?: any) => {
@@ -146,10 +147,12 @@ export default function DashboardLayout({
   return (
     <div className="min-h-screen bg-gray-50">
       <ToastProvider>
-        <RoleBasedLayout>
-          {children}
-        </RoleBasedLayout>
-        <Toaster />
+        <OrganizationProvider>
+          <RoleBasedLayout userRole={currentUser?.role}>
+            {children}
+          </RoleBasedLayout>
+          <Toaster />
+        </OrganizationProvider>
       </ToastProvider>
     </div>
   );

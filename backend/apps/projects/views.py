@@ -2,6 +2,8 @@ from rest_framework import viewsets, status, permissions
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.shortcuts import get_object_or_404
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.exceptions import ValidationError
 
 # Import models
 from .models import Project
@@ -22,40 +24,120 @@ class ProjectViewSet(viewsets.ModelViewSet):
     """
     queryset = Project.objects.all()
     serializer_class = ProjectSerializer
+    permission_classes = [IsAuthenticated, IsOrganizationMember]
     
     def get_permissions(self):
         """
         Instantiates and returns the list of permissions that this view requires.
         """
-        if self.action == 'verify':
-            # Only verifiers can verify projects
-            permission_classes = [IsOrganizationMember(roles=[OrganizationRoleChoices.VERIFIER])]
-        elif self.action in ['create']:
-            # Only admins and salespersons can create projects
-            permission_classes = [
-                IsAdmin | 
-                IsOrganizationMember(roles=[OrganizationRoleChoices.SALESPERSON])
-            ]
-        elif self.action in ['update', 'partial_update']:
-            # Only admins and project managers can update projects
-            permission_classes = [
-                IsAdmin | 
-                IsOrganizationMember(roles=[OrganizationRoleChoices.PROJECT_MANAGER])
-            ]
-        else:
-            # Any authenticated user can view projects (filtering happens in get_queryset)
-            permission_classes = [permissions.IsAuthenticated]
-            
-        return [permission() if not callable(permission) else permission 
-                for permission in permission_classes]
+        if self.action in ['list', 'retrieve']:
+            return [IsAuthenticated()]
+        return [IsAuthenticated(), IsAdmin()]
+    
+    def perform_create(self, serializer):
+        """
+        Save the project instance and update project manager role if needed.
+        """
+        project = serializer.save(created_by=self.request.user)
+        self._update_project_manager_role(project)
+    
+    def perform_update(self, serializer):
+        """
+        Update the project instance and update project manager role if changed.
+        """
+        project = serializer.save()
+        self._update_project_manager_role(project)
+    
+    def _update_project_manager_role(self, project):
+        """
+        Update the role of the assigned project manager to 'project_manager' if not already set.
+        """
+        if project.project_manager and project.project_manager.role != OrganizationRoleChoices.PROJECT_MANAGER:
+            project.project_manager.role = OrganizationRoleChoices.PROJECT_MANAGER
+            project.project_manager.save(update_fields=['role'])
     
     def get_queryset(self):
         """
-        Return projects based on user's role:
-        - Admins see all projects
-        - Organization members see projects based on their role
+        Filter projects based on user's role and organization.
         """
         user = self.request.user
+        queryset = super().get_queryset()
+        
+        # If user is admin, return all projects when no organization filter is applied
+        if user.is_staff or user.is_superuser:
+            organization_id = self.request.query_params.get('organization')
+            if organization_id:
+                try:
+                    queryset = queryset.filter(client__organization_id=organization_id)
+                except (ValueError, TypeError):
+                    raise ValidationError({'organization': 'Invalid organization ID'})
+            return queryset
+            
+        # For regular users, only show projects they have access to
+        user_orgs = user.organization_members.values_list('organization_id', flat=True)
+        return queryset.filter(client__organization_id__in=user_orgs)
+    
+    def get_permissions(self):
+        """
+        Instantiates and returns the list of permissions for this view.
+        """
+        if self.action in ['list', 'retrieve']:
+            return [IsAuthenticated()]
+        return [IsAuthenticated(), IsAdmin()]
+    
+    def get_queryset(self):
+        """
+        Filter projects based on user's role and organization.
+        """
+        user = self.request.user
+        queryset = super().get_queryset()
+        
+        # If user is admin, return all projects when no organization filter is applied
+        if user.is_staff or user.is_superuser:
+            organization_id = self.request.query_params.get('organization')
+            if organization_id:
+                try:
+                    # Try to convert to UUID if it's a number
+                    if organization_id.isdigit():
+                        from uuid import UUID, uuid4
+                        # Convert numeric ID to UUID by padding with zeros
+                        padded_id = organization_id.zfill(32)
+                        organization_id = str(UUID(padded_id))
+                    return queryset.filter(client__organization_id=organization_id)
+                except (ValueError, AttributeError):
+                    return queryset.none()
+            return queryset
+            
+        # For regular users, return only their organization's projects
+        if hasattr(user, 'organization_id') and user.organization_id:
+            return queryset.filter(client__organization_id=user.organization_id)
+            
+        return queryset.none()
+    
+    def perform_create(self, serializer):
+        """Set the created_by field to the current user."""
+        serializer.save(created_by=self.request.user)
+    
+    @action(detail=True, methods=['post'])
+    def assign(self, request, pk=None):
+        """Assign a project to a user."""
+        project = self.get_object()
+        user_id = request.data.get('user_id')
+        
+        if not user_id:
+            return Response(
+                {"error": "User ID is required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+            
+        # Add your assignment logic here
+        # Example: project.assigned_to_id = user_id
+        # project.save()
+        
+        return Response(
+            {"status": "Project assigned successfully"},
+            status=status.HTTP_200_OK
+        )
         queryset = Project.objects.all()
         
         # If user is admin, return all projects

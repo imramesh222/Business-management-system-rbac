@@ -31,6 +31,9 @@ router.register(r'subscription/plans', SubscriptionPlanViewSet, basename='subscr
 router.register(r'subscription/durations', PlanDurationViewSet, basename='plan-duration')
 router.register(r'subscription/subscriptions', OrganizationSubscriptionViewSet, basename='organization-subscription')
 
+# Dashboard endpoints
+router.register(r'dashboard/metrics', DashboardViewSet, basename='dashboard-metrics')
+
 # URL patterns
 urlpatterns = [
     # Include router URLs - this will create the standard REST endpoints
@@ -57,8 +60,7 @@ urlpatterns = [
     # Debug endpoint
     path('organizations/debug/<uuid:pk>/', debug_organization_view, name='debug-organization'),
     
-    # Dashboard endpoints
-    path('dashboard/metrics/', DashboardViewSet.as_view(), name='dashboard-metrics'),
+    # Dashboard admin endpoint
     path('dashboard/admin/overview/', OrganizationAdminDashboardView.as_view(), name='organization-admin-dashboard'),
          
     # Developer-specific endpoints

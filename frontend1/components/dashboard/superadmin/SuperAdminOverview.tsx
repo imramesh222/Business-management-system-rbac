@@ -30,79 +30,17 @@ import {
 
 // Import services and types
 import { fetchDashboardData, fetchOrganizationMetrics } from '@/services/organizationService';
-import { fetchRecentActivities } from '@/services/activityService';
+import { fetchSystemHealth } from '@/services/systemService';
 
-// Import the Activity type with an alias to avoid conflict with the Activity icon
-import type { Activity as ActivityType } from '@/services/activityService';
-
-// Define a new type for the UI that matches our needs
-interface ExtendedActivity {
-  id: string;
-  type: 'member' | 'project' | 'billing' | 'meeting' | 'system';
-  title: string;
-  description: string;
-  timestamp: string;
-  user_name: string;
-  // Allow any other properties that might come from the API
-  [key: string]: any;
-}
 import type { 
-  OrganizationDashboardData,
   OrganizationMetrics,
   OrganizationActivity,
   OrganizationRole,
-  OrganizationProject
+  OrganizationProject,
+  OrganizationDashboardData
 } from '@/types/organization';
 
-import { SystemHealth, fetchSystemHealth } from '@/services/systemService';
-
-// Define API response type that matches the backend response
-interface ApiDashboardResponse {
-  metrics: {
-    // Support both snake_case and camelCase for backward compatibility
-    total_members?: number;
-    totalMembers?: number;
-    active_members?: number;
-    activeMembers?: number;
-    total_projects?: number;
-    totalProjects?: number;
-    active_projects?: number;
-    activeProjects?: number;
-    pending_tasks?: number;
-    pendingTasks?: number;
-    completed_tasks?: number;
-    completedTasks?: number;
-    monthly_revenue?: number;
-    monthlyRevenue?: number;
-    total_revenue?: number;
-    totalRevenue?: number;
-    pending_invoices?: number;
-    pendingInvoices?: number;
-    overdue_invoices?: number;
-    overdueInvoices?: number;
-    storage_usage?: number;
-    storageUsage?: number;
-    storage_limit?: number;
-    storageLimit?: number;
-    team_productivity?: number;
-    teamProductivity?: number;
-    member_growth?: number;
-    memberGrowth?: number;
-    project_completion_rate?: number;
-    projectCompletionRate?: number;
-    member_activity?: Array<{ date: string; active: number; new: number }>;
-    memberActivity?: Array<{ date: string; active: number; new: number }>;
-    project_status?: Array<{ status: string; count: number; color?: string }>;
-    projectStatus?: Array<{ status: string; count: number; color?: string }>;
-  };
-  recentActivities?: OrganizationActivity[];
-  projects?: OrganizationProject[];
-  upcomingDeadlines?: any[];
-  teamMembers?: any[];
-}
-
-// Define types for the dashboard data
-type DashboardData = OrganizationDashboardData;
+import { FrontendSystemHealth } from '@/services/systemService';
 
 // Recharts components
 import {
@@ -124,6 +62,57 @@ import UserManagementSection from './sections/UserManagementSection';
 import { UserStatisticsSection } from './sections/UserStatisticsSection';
 import { OrganizationManagementSection } from './sections/OrganizationManagementSection';
 import { OrganizationMetricsSection } from './sections/OrganizationMetricsSection';
+import { SystemSettingsSection } from './sections/SystemSettingsSection';
+
+// Define a new type for the UI that matches our needs
+interface ExtendedActivity {
+  id: string;
+  type: 'member' | 'project' | 'billing' | 'meeting' | 'system';
+  title: string;
+  description: string;
+  timestamp: string;
+  user_name: string;
+  action?: string;
+  user?: string;
+  time?: string;
+  [key: string]: any;
+}
+
+// Backend activity response type
+interface BackendActivity {
+  id: number;
+  action: string;
+  user: string;
+  time: string;
+  type: string;
+  timestamp: string;
+}
+
+interface DashboardData {
+  metrics: {
+    totalOrganizations: number;
+    totalMembers: number;
+    activeMembers: number;
+    totalProjects: number;
+    activeProjects: number;
+    pendingTasks: number;
+    completedTasks: number;
+    monthlyRevenue: number;
+    totalRevenue: number;
+    pendingInvoices: number;
+    overdueInvoices: number;
+    storageUsage: number;
+    storageLimit: number;
+    teamProductivity: number;
+    memberGrowth: number;
+    projectCompletionRate: number;
+    memberActivity: Array<{ month: string; new: number; active: number }>;
+    projectStatus: Array<{ status: string; count: number; color: string }>;
+  };
+  recentActivities: ExtendedActivity[];
+  systemHealth?: FrontendSystemHealth;
+  lastUpdated?: Date;
+}
 
 // Types for metric cards
 type MetricCard = {
@@ -134,8 +123,6 @@ type MetricCard = {
   changeType?: 'positive' | 'negative' | 'neutral';
   className?: string;
 };
-
-
 
 // Default dashboard data
 const defaultDashboardData: DashboardData = {
@@ -152,22 +139,15 @@ const defaultDashboardData: DashboardData = {
     pendingInvoices: 0,
     overdueInvoices: 0,
     storageUsage: 0,
-    storageLimit: 0,
+    storageLimit: 1,
     teamProductivity: 0,
     memberGrowth: 0,
     projectCompletionRate: 0,
     memberActivity: [],
     projectStatus: []
   },
-  recentActivities: [],
-  projects: [],
-  upcomingDeadlines: [],
-  teamMembers: []
-} as unknown as DashboardData;
-
-// Import the frontend types from systemService
-import { FrontendSystemHealth } from '@/services/systemService';
-import { SystemSettingsSection } from './sections/SystemSettingsSection';
+  recentActivities: []
+};
 
 // Default system health data
 const defaultSystemHealth: FrontendSystemHealth = {
@@ -186,7 +166,7 @@ const defaultSystemHealth: FrontendSystemHealth = {
   server: {
     cpu: 0,
     memory: 0,
-    disk: 0, // This is just a number (usage_percent) in the FrontendSystemHealth type
+    disk: 0,
     uptime: ''
   },
   services: []
@@ -202,26 +182,42 @@ function SuperAdminOverview() {
   const [activities, setActivities] = useState<Array<ExtendedActivity>>([]);
 
   // Format relative time (e.g., '2 hours ago')
-  const formatRelativeTime = useCallback((date: Date): string => {
+  const formatRelativeTime = useCallback((dateInput: Date | string): string => {
+    const date = typeof dateInput === 'string' ? new Date(dateInput) : dateInput;
     const now = new Date();
     const diffInSeconds = Math.floor((now.getTime() - date.getTime()) / 1000);
     
     const minute = 60;
     const hour = minute * 60;
     const day = hour * 24;
+    const week = day * 7;
+    const month = day * 30;
+    const year = day * 365;
     
-    if (diffInSeconds < minute) {
-      return 'just now';
-    } else if (diffInSeconds < hour) {
+    if (isNaN(diffInSeconds) || diffInSeconds < 0) return 'Just now';
+    if (diffInSeconds < minute) return 'Just now';
+    if (diffInSeconds < hour) {
       const minutes = Math.floor(diffInSeconds / minute);
       return `${minutes} ${minutes === 1 ? 'minute' : 'minutes'} ago`;
-    } else if (diffInSeconds < day) {
+    }
+    if (diffInSeconds < day) {
       const hours = Math.floor(diffInSeconds / hour);
       return `${hours} ${hours === 1 ? 'hour' : 'hours'} ago`;
-    } else {
+    }
+    if (diffInSeconds < week) {
       const days = Math.floor(diffInSeconds / day);
       return `${days} ${days === 1 ? 'day' : 'days'} ago`;
     }
+    if (diffInSeconds < month) {
+      const weeks = Math.floor(diffInSeconds / week);
+      return `${weeks} ${weeks === 1 ? 'week' : 'weeks'} ago`;
+    }
+    if (diffInSeconds < year) {
+      const months = Math.floor(diffInSeconds / month);
+      return `${months} ${months === 1 ? 'month' : 'months'} ago`;
+    }
+    const years = Math.floor(diffInSeconds / year);
+    return `${years} ${years === 1 ? 'year' : 'years'} ago`;
   }, []);
 
   // Format number with commas
@@ -270,135 +266,69 @@ function SuperAdminOverview() {
     
     try {
       // Fetch all data in parallel
-      const [dashboardResponse, healthResponse, activitiesResponse] = await Promise.all([
+      const [dashboardResponse, healthResponse] = await Promise.all([
         fetchDashboardData(),
-        fetchSystemHealth(),
-        fetchRecentActivities(5) // Get 5 most recent activities
+        fetchSystemHealth()
       ]);
       
-      setDashboardData(dashboardResponse);
-      setSystemHealth(healthResponse);
-      setLastUpdated(new Date(healthResponse.timestamp));
+      // Update dashboard data with the response
+      if (dashboardResponse) {
+        const apiResponse = dashboardResponse as any;
+        
+        // Extract metrics with proper type handling
+        const metrics = {
+          totalOrganizations: apiResponse.metrics?.totalOrganizations || 0,
+          totalMembers: apiResponse.metrics?.totalMembers || 0,
+          activeMembers: apiResponse.metrics?.activeMembers || 0,
+          totalProjects: apiResponse.metrics?.totalProjects || 0,
+          activeProjects: apiResponse.metrics?.activeProjects || 0,
+          pendingTasks: apiResponse.metrics?.pendingTasks || 0,
+          completedTasks: apiResponse.metrics?.completedTasks || 0,
+          monthlyRevenue: apiResponse.metrics?.monthlyRevenue || 0,
+          totalRevenue: apiResponse.metrics?.totalRevenue || 0,
+          pendingInvoices: apiResponse.metrics?.pendingInvoices || 0,
+          overdueInvoices: apiResponse.metrics?.overdueInvoices || 0,
+          storageUsage: apiResponse.metrics?.storageUsage || 0,
+          storageLimit: apiResponse.metrics?.storageLimit || 1,
+          teamProductivity: apiResponse.metrics?.teamProductivity || 0,
+          memberGrowth: apiResponse.metrics?.memberGrowth || 0,
+          projectCompletionRate: apiResponse.metrics?.projectCompletionRate || 0,
+          memberActivity: apiResponse.metrics?.memberActivity || [],
+          projectStatus: apiResponse.metrics?.projectStatus || []
+        };
+
+        // Map recent activities to ExtendedActivity format
+        const recentActivities: ExtendedActivity[] = (apiResponse.recentActivities || []).map((a: OrganizationActivity) => ({
+          id: String(a.id),
+          title: a.action || 'Activity',
+          description: a.action || 'No description',
+          timestamp: a.timestamp || new Date().toISOString(),
+          user_name: a.userName || 'System',
+          type: 'system' as const,
+          action: a.action,
+          user: a.userName
+        }));
+
+        setDashboardData({
+          metrics,
+          recentActivities
+        });
+        
+        setActivities(recentActivities);
+      }
       
-      // Map activities to natural language format
-      const formattedActivities = activitiesResponse.map(activity => {
-        const userName = activity.user_details?.full_name || activity.user_details?.username || 'System';
-        const objectName = activity.details?.name || activity.object_id || 'item';
-        
-        // Action mappings for common activity types
-        const actionMap: Record<string, string> = {
-          // User actions
-          'user_created': 'created user',
-          'user_updated': 'updated user',
-          'user_deleted': 'deleted user',
-          'user_logged_in': 'logged in',
-          'user_logged_out': 'logged out',
-          'user_password_changed': 'changed password',
-          'user_profile_updated': 'updated profile',
-          
-          // Organization actions
-          'organization_created': 'created organization',
-          'organization_updated': 'updated organization',
-          'organization_deleted': 'deleted organization',
-          'organization_member_added': 'added member to organization',
-          'organization_member_removed': 'removed member from organization',
-          'organization_member_role_changed': 'changed role for organization member',
-          
-          // Project actions
-          'project_created': 'created project',
-          'project_updated': 'updated project',
-          'project_deleted': 'deleted project',
-          'project_completed': 'marked project as complete',
-          'project_archived': 'archived project',
-          
-          // Task actions
-          'task_created': 'created task',
-          'task_updated': 'updated task',
-          'task_deleted': 'deleted task',
-          'task_completed': 'completed task',
-          'task_assigned': 'assigned task',
-          'task_unassigned': 'unassigned task',
-          
-          // Billing actions
-          'payment_received': 'received payment',
-          'invoice_created': 'created invoice',
-          'invoice_sent': 'sent invoice',
-          'invoice_paid': 'marked invoice as paid',
-          'payment_failed': 'payment failed',
-          'subscription_created': 'created subscription',
-          'subscription_updated': 'updated subscription',
-          'subscription_cancelled': 'cancelled subscription',
-          
-          // System actions
-          'system_update': 'performed system update',
-          'settings_updated': 'updated settings',
-          'export_completed': 'completed export',
-          'import_completed': 'completed import',
-          'backup_created': 'created backup',
-          'restore_completed': 'completed restore'
-        };
-        
-        // Generate the action text
-        const action = actionMap[activity.activity_type] || 
-                     activity.activity_type?.replace(/_/g, ' ') || 
-                     'performed an action';
-        
-        // Generate the target text
-        let target = '';
-        if (activity.object_type && objectName) {
-          target = `"${objectName}"`;
-        } else if (activity.object_type) {
-          target = `the ${activity.object_type}`;
-        }
-        
-        // Combine into a natural language sentence
-        const description = `${userName} ${action}${target ? ' ' + target : ''}`;
-        
-        // Determine the title based on object type
-        const titleMap: Record<string, string> = {
-          'user': 'User Activity',
-          'organization': 'Organization Update',
-          'project': 'Project Update',
-          'task': 'Task Update',
-          'billing': 'Billing Activity',
-          'invoice': 'Billing Activity',
-          'payment': 'Payment Activity'
-        };
-        
-        const title = titleMap[activity.object_type || ''] || 'System Activity';
-
-        // Create the formatted activity
-        const formattedActivity: ExtendedActivity = {
-          id: String(activity.id),
-          title: title,
-          description: description,
-          timestamp: activity.created_at || new Date().toISOString(),
-          user_name: userName,
-          type: (() => {
-            if (activity.object_type === 'user') return 'member';
-            if (['project', 'task'].includes(activity.object_type || '')) return 'project';
-            if (['billing', 'invoice', 'payment'].includes(activity.object_type || '')) return 'billing';
-            if (['meeting', 'event'].includes(activity.object_type || '')) return 'meeting';
-            return 'system';
-          })()
-        };
-
-        return formattedActivity;
-      });
-
-      // Ensure all activities have unique IDs
-      const activitiesWithUniqueIds = formattedActivities.map((activity, index) => ({
-        ...activity,
-        id: activity.id || `activity-${Date.now()}-${index}`
-      }));
+      // Update system health
+      if (healthResponse) {
+        setSystemHealth(healthResponse);
+      }
       
-      setActivities(activitiesWithUniqueIds);
+      setLastUpdated(new Date());
     } catch (err) {
       console.error('Error fetching dashboard data:', err);
       setError('Failed to load dashboard data. Please try again later.');
       toast({
         title: 'Error',
-        description: 'Failed to load dashboard data.',
+        description: 'Failed to load dashboard data. Please try refreshing the page.',
         variant: 'destructive',
       });
     } finally {
@@ -428,61 +358,67 @@ function SuperAdminOverview() {
     teamProductivity = 0,
     memberGrowth = 0,
     storageUsage = 0,
-    storageLimit = 0
+    storageLimit = 1
   } = metrics || {};
 
   // Calculate storage metrics
-  const storagePercentage = systemHealth.server.disk; // This is the usage percentage
-  const storageLimitBytes = 1024 * 1024 * 1024 * 10; // 10GB default limit
-  const storageUsageBytes = (storagePercentage / 100) * storageLimitBytes;
+  const storagePercentage = useMemo(() => {
+    if (!dashboardData.metrics.storageLimit) return 0;
+    return Math.round((dashboardData.metrics.storageUsage / dashboardData.metrics.storageLimit) * 100);
+  }, [dashboardData.metrics.storageUsage, dashboardData.metrics.storageLimit]);
+  
+  const formatStorage = useCallback((bytes: number): string => {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  }, []);
 
   // Prepare metric cards data
   const metricCards = useMemo<MetricCard[]>(() => {
     if (isLoading) {
-      return Array(4).fill(0).map((_, i) => ({
-        title: 'Loading...',
-        value: '...',
-        icon: Loader2,
-        className: 'animate-pulse'
-      }));
+      return [
+        { title: 'Loading...', value: '...', icon: Loader2 },
+        { title: 'Loading...', value: '...', icon: Loader2 },
+        { title: 'Loading...', value: '...', icon: Loader2 },
+        { title: 'Loading...', value: '...', icon: Loader2 }
+      ];
     }
 
     const cards: MetricCard[] = [
       {
         title: 'Total Organizations',
-        value: String(metrics.totalOrganizations || 0),
+        value: formatNumber(metrics.totalOrganizations),
         icon: Building2,
-        change: '0% from last month',
-        changeType: 'neutral' as const
+        change: `${metrics.memberGrowth >= 0 ? '+' : ''}${metrics.memberGrowth || 0}% from last month`,
+        changeType: metrics.memberGrowth > 0 ? 'positive' : metrics.memberGrowth < 0 ? 'negative' : 'neutral'
       },
       {
         title: 'Total Members',
-        value: String(metrics.totalMembers || 0),
-        change: `${metrics.activeMembers || 0} active`,
-        changeType: 'neutral' as const,
+        value: formatNumber(metrics.totalMembers),
+        change: `${formatNumber(metrics.activeMembers)} active`,
+        changeType: 'neutral',
         icon: Users,
       },
       {
         title: 'Monthly Revenue',
-        value: formatCurrency(metrics.monthlyRevenue || 0),
-        change: 'View details',
-        changeType: 'positive' as const,
+        value: formatCurrency(metrics.monthlyRevenue),
+        change: `${metrics.monthlyRevenue > 0 ? '+' : ''}${formatCurrency(metrics.monthlyRevenue)} this month`,
+        changeType: metrics.monthlyRevenue > 0 ? 'positive' : metrics.monthlyRevenue < 0 ? 'negative' : 'neutral',
         icon: DollarSign,
       },
       {
-        title: 'Total Projects',
-        value: String(metrics.totalProjects || 0),
+        title: 'Active Projects',
+        value: formatNumber(metrics.activeProjects),
         icon: FolderOpen,
-        change: '0% from last month',
-        changeType: 'neutral' as const
+        change: `${metrics.projectCompletionRate || 0}% completed`,
+        changeType: metrics.projectCompletionRate > 70 ? 'positive' : metrics.projectCompletionRate < 30 ? 'negative' : 'neutral'
       },
     ];
     
     return cards;
   }, [isLoading, metrics, formatNumber, formatCurrency]);
-
-  // Update activities when dashboard data changes - removed duplicate logic
-  // Activities are now only set from the fetchData function
 
   // Prepare data for section components
   const organizationMetrics: OrganizationMetrics = useMemo(() => ({
@@ -495,26 +431,33 @@ function SuperAdminOverview() {
     memberGrowth: metrics.memberGrowth || 0,
     projectCompletionRate: metrics.projectCompletionRate || 0,
     storageUsage: metrics.storageUsage || 0,
-    storageLimit: metrics.storageLimit || 0,
-    memberActivity: Array.isArray(metrics.memberActivity) ? metrics.memberActivity : [],
-    projectStatus: Array.isArray(metrics.projectStatus) ? metrics.projectStatus : [],
+    storageLimit: metrics.storageLimit || 1,
     pendingTasks: metrics.pendingTasks || 0,
     completedTasks: metrics.completedTasks || 0,
     totalRevenue: metrics.totalRevenue || 0,
     pendingInvoices: metrics.pendingInvoices || 0,
     overdueInvoices: metrics.overdueInvoices || 0,
-    teamProductivity: metrics.teamProductivity || 0
+    teamProductivity: metrics.teamProductivity || 0,
+    memberActivity: Array.isArray(metrics.memberActivity) 
+      ? metrics.memberActivity.map(activity => ({
+          date: activity.month || new Date().toISOString().split('T')[0],
+          active: activity.active || 0,
+          new: activity.new || 0
+        }))
+      : [],
+    projectStatus: Array.isArray(metrics.projectStatus) ? metrics.projectStatus : []
   }), [metrics]);
 
   // Handle refresh
-  const handleRefresh = useCallback(() => {
+  const handleRefresh = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
     setIsLoading(true);
     setError(null);
     fetchData();
   }, [fetchData]);
 
   // Render loading state
-  if (isLoading) {
+  if (isLoading && activities.length === 0) {
     return (
       <div className="flex items-center justify-center h-64">
         <Loader2 className="w-8 h-8 mr-2 animate-spin" />
@@ -524,7 +467,7 @@ function SuperAdminOverview() {
   }
 
   // Render error state
-  if (error) {
+  if (error && activities.length === 0) {
     return (
       <div className="p-4 text-center">
         <AlertCircle className="w-12 h-12 mx-auto mb-4 text-red-500" />
@@ -533,7 +476,7 @@ function SuperAdminOverview() {
         <Button 
           variant="outline" 
           className="mt-4"
-          onClick={fetchData}
+          onClick={handleRefresh}
           disabled={isLoading}
         >
           {isLoading ? (
@@ -560,7 +503,7 @@ function SuperAdminOverview() {
           <Button 
             variant="outline" 
             size="sm" 
-            onClick={fetchData}
+            onClick={handleRefresh}
             disabled={isLoading}
           >
             {isLoading ? (
@@ -777,7 +720,7 @@ function SuperAdminOverview() {
               variant="ghost" 
               size="sm" 
               className="text-muted-foreground hover:text-foreground hover:bg-muted/50"
-              onClick={() => fetchData()}
+              onClick={handleRefresh}
               disabled={isLoading}
             >
               <RefreshCw className={`w-4 h-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
@@ -794,7 +737,6 @@ function SuperAdminOverview() {
               </div>
             ) : activities.length > 0 ? (
               activities.map((activity, index) => {
-                // Ensure we have a unique key for each activity
                 const activityKey = activity.id || `activity-${index}-${activity.timestamp || Date.now()}`;
                 
                 return (
@@ -863,12 +805,12 @@ function SuperAdminOverview() {
 
       {/* Section Components - These are now self-contained with their own data fetching */}
       <div className="space-y-6">
-      <UserManagementSection />
-      <OrganizationManagementSection />
-      <SystemHealthSection />
-      <UserStatisticsSection />
-      <OrganizationMetricsSection />
-      <SystemSettingsSection />
+        <UserManagementSection />
+        <OrganizationManagementSection />
+        <SystemHealthSection />
+        <UserStatisticsSection />
+        <OrganizationMetricsSection />
+        <SystemSettingsSection />
       </div>
     </div>
   );

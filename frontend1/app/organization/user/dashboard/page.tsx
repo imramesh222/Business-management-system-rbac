@@ -56,7 +56,7 @@ export default function UserDashboard() {
       
       // Define role-specific paths for all roles
       const rolePaths: Record<string, string> = {
-        'superadmin': '/organization/superadmin/dashboard',
+        'superadmin': '/superadmin',
         'admin': '/organization/admin/dashboard',
         'project_manager': '/organization/project/dashboard',
         'developer': '/organization/developer/dashboard',

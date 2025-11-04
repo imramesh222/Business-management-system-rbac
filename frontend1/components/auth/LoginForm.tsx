@@ -124,8 +124,8 @@ const LoginForm = () => {
         // Define role to path mappings
         const roleMappings: Record<string, string> = {
           // Super Admin
-          'superadmin': '/superadmin/dashboard',
-          'super_admin': '/superadmin/dashboard',
+          'superadmin': '/superadmin',
+          'super_admin': '/superadmin',
           
           // Organization Admin/Manager
           'admin': '/organization/dashboard',

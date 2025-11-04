@@ -18,76 +18,83 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         token = super().get_token(user)
         
         # Initialize default values
-        role = 'user'
+        role = 'superadmin' if user.is_superuser else 'user'
         org_membership = None
         
+        # Set default token values for superuser
+        token['is_superuser'] = user.is_superuser
+        token['is_staff'] = user.is_staff
+        
         try:
-            logger.info(f"[JWT Token] Looking up organization memberships for user: {user.email}")
-            
-            # Get all active organization memberships ordered by role (highest first)
-            # We use -role to get the highest role first (assuming role is ordered by permissions)
-            org_memberships = OrganizationMember.objects.filter(
-                user=user,
-                is_active=True
-            ).select_related('organization').order_by('-role').all()
-            
-            logger.info(f"[JWT Token] Found {org_memberships.count()} active organization memberships")
-            
-            # Debug: Log all memberships
-            for idx, m in enumerate(org_memberships, 1):
-                logger.info(f"[JWT Token] Membership {idx}: ID={m.id}, Role={m.role}, Org={m.organization.name if m.organization else 'None'}, Active={m.is_active}")
-            
-            # Get the first active organization membership with the highest role
-            if org_memberships.exists():
-                # Get the membership with the highest role (first one due to ordering)
-                org_membership = org_memberships.first()
-                logger.info(f"[JWT Token] Using organization membership: {org_membership.id}")
-                logger.info(f"[JWT Token] Role from DB: {getattr(org_membership, 'role', 'No role')}, Organization: {org_membership.organization.name}")
-                
-                # Get the role value from the membership
-                role_value = getattr(org_membership, 'role', None)
-                logger.info(f"[JWT Token] Raw role value: {role_value}, Type: {type(role_value).__name__}")
-                
-                # Convert role to string and ensure it's a valid role
-                role = str(role_value).lower() if role_value is not None else 'user'
-                
-                # Ensure the role is one of the valid choices
-                valid_roles = [choice[0] for choice in OrganizationRoleChoices.choices]
-                if role not in valid_roles:
-                    logger.warning(f"[JWT Token] Invalid role '{role}' found, defaulting to 'user'")
-                    role = 'user'
-                
-                logger.info(f"[JWT Token] Processed role: {role}")
-                
-                # Set organization data in token
-                token['organization_id'] = str(org_membership.organization.id)
-                token['organization_name'] = org_membership.organization.name
-                token['is_staff'] = getattr(org_membership, 'is_staff', False) or False
-                token['is_superuser'] = user.is_superuser
-                
-                # Set both role and organization_role in the token
-                token['role'] = role
-                token['organization_role'] = role
-                
-                # Add a debug claim to verify the role was set
-                token['_debug_role'] = role
-                
-                # Log the final assignment
-                logger.info(f"[JWT Token] Final role assignment - role: {role}, org_role: {role}")
-                
-                # Add debug logging for token claims
-                logger.info(f"[JWT Token] Token claims being set: {token.payload}")
-                
-                # Debug log the token data structure
-                logger.info(f"[JWT Token] Token data after role assignment: {token}")
-                
-                # Debug: Log the final token data
-                logger.info(f"[JWT Token] Final token data - role: {role}, org_id: {token['organization_id']}, org_name: {token['organization_name']}")
+            # If user is superadmin, we can skip organization membership checks
+            if user.is_superuser:
+                logger.info(f"[JWT Token] User {user.email} is a superadmin, setting role to 'superadmin'")
+                token['role'] = 'superadmin'
+                token['organization_role'] = 'superadmin'
             else:
-                logger.warning(f"[JWT Token] No active organization memberships found for user {user.email}")
-                token['role'] = role  # Use default 'user' role
-                token['is_staff'] = user.is_staff
-                token['is_superuser'] = user.is_superuser
+                logger.info(f"[JWT Token] Looking up organization memberships for user: {user.email}")
+                
+                # Get all active organization memberships ordered by role (highest first)
+                org_memberships = OrganizationMember.objects.filter(
+                    user=user,
+                    is_active=True
+                ).select_related('organization').order_by('-role').all()
+                
+                logger.info(f"[JWT Token] Found {org_memberships.count()} active organization memberships")
+                
+                # Debug: Log all memberships
+                for idx, m in enumerate(org_memberships, 1):
+                    logger.info(f"[JWT Token] Membership {idx}: ID={m.id}, Role={m.role}, Org={m.organization.name if m.organization else 'None'}, Active={m.is_active}")
+                
+                # Get the first active organization membership with the highest role
+                if org_memberships.exists():
+                    # Get the membership with the highest role (first one due to ordering)
+                    org_membership = org_memberships.first()
+                    logger.info(f"[JWT Token] Using organization membership: {org_membership.id}")
+                    logger.info(f"[JWT Token] Role from DB: {getattr(org_membership, 'role', 'No role')}, Organization: {org_membership.organization.name}")
+                    
+                    # Get the role value from the membership
+                    role_value = getattr(org_membership, 'role', None)
+                    logger.info(f"[JWT Token] Raw role value: {role_value}, Type: {type(role_value).__name__}")
+                    
+                    # Convert role to string and ensure it's a valid role
+                    role = str(role_value).lower() if role_value is not None else 'user'
+                    
+                    # Ensure the role is one of the valid choices
+                    valid_roles = [choice[0] for choice in OrganizationRoleChoices.choices]
+                    if role not in valid_roles:
+                        logger.warning(f"[JWT Token] Invalid role '{role}' found, defaulting to 'user'")
+                        role = 'user'
+                    
+                    logger.info(f"[JWT Token] Processed role: {role}")
+                    
+                    # Set organization data in token
+                    token['organization_id'] = str(org_membership.organization.id)
+                    token['organization_name'] = org_membership.organization.name
+                    token['is_staff'] = getattr(org_membership, 'is_staff', False) or False
+                    
+                    # Set both role and organization_role in the token
+                    token['role'] = role
+                    token['organization_role'] = role
+                    
+                    # Add a debug claim to verify the role was set
+                    token['_debug_role'] = role
+                    
+                    # Log the final assignment
+                    logger.info(f"[JWT Token] Final role assignment - role: {role}, org_role: {role}")
+                    
+                    # Add debug logging for token claims
+                    logger.info(f"[JWT Token] Token claims being set: {token.payload}")
+                    
+                    # Debug log the token data structure
+                    logger.info(f"[JWT Token] Token data after role assignment: {token}")
+                    
+                    # Debug: Log the final token data
+                    logger.info(f"[JWT Token] Final token data - role: {role}, org_id: {token['organization_id']}, org_name: {token['organization_name']}")
+                else:
+                    logger.warning(f"[JWT Token] No active organization memberships found for user {user.email}")
+                    token['role'] = role  # Use default 'user' role
+                    token['is_staff'] = user.is_staff
             
             # Always set these basic claims
             token['name'] = user.get_full_name() or user.email
@@ -98,6 +105,13 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
             
         except Exception as e:
             logger.error(f"[JWT Token] Error processing organization membership for user {user.id}: {str(e)}", exc_info=True)
+            # Fall back to default role if there's an error
+            token['role'] = role
+            token['is_superuser'] = user.is_superuser
+            token['is_staff'] = user.is_staff
+            token['name'] = user.get_full_name() or user.email
+            token['email'] = user.email
+            token['user_id'] = str(user.id)
             # Fall back to basic user role if there's an error
             token['role'] = 'user'
             token['is_staff'] = user.is_staff

@@ -30,12 +30,12 @@ export default function DashboardPage() {
 
       // Map of role to dashboard paths with /organization/ prefix
       const roleToPath: Record<UserRole, string> = {
-        'superadmin': '/superadmin/dashboard',
+        'superadmin': '/superadmin',  // Updated to match the actual route
         'admin': '/organization/dashboard', // Organization admin dashboard
-        'manager': '/organization/project-manager/dashboard',
+        // 'manager': '/organization/project-manager/dashboard',
         'project_manager': '/organization/project-manager/dashboard',
         'developer': '/organization/developer/dashboard',
-        'sales': '/organization/sales/dashboard',
+        // 'sales': '/organization/sales/dashboard',
         'salesperson': '/organization/sales/dashboard',
         'support': '/organization/support/dashboard',
         'verifier': '/organization/verifier/dashboard',

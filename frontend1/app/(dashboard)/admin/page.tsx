@@ -17,9 +17,9 @@ export default function AdminDashboard() {
       return;
     }
 
-    // Superadmins can access everything
+    // Redirect superadmins to superadmin page
     if (user.is_superuser) {
-      // Superadmin is already in the right place
+      router.push('/superadmin');
       return;
     }
 
@@ -52,12 +52,8 @@ export default function AdminDashboard() {
           <span className="text-sm text-gray-500">
             Logged in as: <span className="font-medium">{user.name || user.email}</span>
           </span>
-          <span className={`px-2 py-1 text-xs rounded-full ${
-            user.is_superuser 
-              ? 'bg-purple-100 text-purple-800' 
-              : 'bg-blue-100 text-blue-800'
-          }`}>
-            {user.is_superuser ? 'Super Admin' : user.role}
+          <span className="px-2 py-1 text-xs bg-blue-100 text-blue-800 rounded-full">
+            {user.role}
           </span>
         </div>
       </div>

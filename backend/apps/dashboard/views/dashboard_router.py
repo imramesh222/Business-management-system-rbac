@@ -10,7 +10,7 @@ class DashboardRouterView(APIView):
     def get_dashboard_url(self, role):
         """Get the dashboard URL based on user role."""
         role_dashboards = {
-            'superadmin': '/superadmin/dashboard',
+            'superadmin': '/superadmin',
             'admin': '/organization/dashboard',
             'project_manager': '/organization/project-manager/dashboard',
             'manager': '/organization/project-manager/dashboard',  # Alias for project_manager

@@ -28,6 +28,15 @@ interface SuperadminDashboardResponse {
     member_growth: number;
     storage_usage: number;
     storage_limit: number;
+    // Adding missing properties
+    total_projects?: number;
+    active_projects?: number;
+    pending_tasks?: number;
+    completed_tasks?: number;
+    pending_invoices?: number;
+    overdue_invoices?: number;
+    team_productivity?: number;
+    project_completion_rate?: number;
   };
   member_activity?: Array<{
     month: string;
@@ -898,8 +907,6 @@ export const createOrganization = async (data: {
 
 /**
  * Fetches dashboard data for the organization
- */
-/**
  * Fetches all members of the current organization
  */
 export const fetchOrganizationMembers = async (organizationId: string): Promise<OrganizationMember[]> => {
@@ -910,6 +917,32 @@ export const fetchOrganizationMembers = async (organizationId: string): Promise<
     return response.members || [];
   } catch (error) {
     console.error('Error fetching organization members:', error);
+    throw error;
+  }
+};
+
+/**
+ * Deletes an organization
+ * @param orgId - The ID of the organization to delete
+ */
+export const deleteOrganization = async (orgId: string): Promise<{ success: boolean; message: string }> => {
+  try {
+    const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/org/organizations/${orgId}/`, {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+      },
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.detail || 'Failed to delete organization');
+    }
+
+    return { success: true, message: 'Organization deleted successfully' };
+  } catch (error) {
+    console.error('Error deleting organization:', error);
     throw error;
   }
 };

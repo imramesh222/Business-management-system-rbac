@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
+import { useRouter } from 'next/navigation';
 import * as z from 'zod';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -21,7 +22,7 @@ import { Progress } from '@/components/ui/progress';
 // Import services and types
 import { DataTable, type DataTableColumnDef } from '@/components/dashboard/common';
 import { Input } from '@/components/ui/input';
-import { fetchOrganizations, createOrganization } from '@/services/organizationService';
+import { fetchOrganizations, createOrganization, deleteOrganization } from '@/services/organizationService';
 import { fetchSubscriptionPlans, fetchPlanDurations, getDurationDisplay } from '@/services/subscriptionService';
 import type { SubscriptionPlan, PlanDuration } from '@/types/subscription';
 import type { Organization, OrganizationSubscriptionDetails } from '@/types/organization';
@@ -55,7 +56,6 @@ const getStatusBadge = (status: Organization['status']) => {
 
 // Form schema for organization creation
 const organizationFormSchema = z.object({
-  // Basic Information
   name: z.string().min(2, {
     message: 'Organization name must be at least 2 characters.',
   }),
@@ -64,8 +64,6 @@ const organizationFormSchema = z.object({
   }).regex(/^[a-z0-9-]+$/, {
     message: 'Slug can only contain lowercase letters, numbers, and hyphens.',
   }),
-  
-  // Contact Information
   email: z.string().email({
     message: 'Please enter a valid email address.',
   }).min(1, {
@@ -75,37 +73,26 @@ const organizationFormSchema = z.object({
   website: z.string().url({
     message: 'Please enter a valid URL including http:// or https://',
   }).optional().or(z.literal('')),
-  
-  // Subscription Plan
   plan_id: z.string({
     required_error: 'Please select a subscription plan.',
   }),
   plan_duration: z.string({
     required_error: 'Please select a plan duration.',
   }),
-  
-  // Status
   status: z.enum(['active', 'trial', 'suspended', 'inactive']).default('active'),
-  
-  // Limits (will be overridden by plan limits if not specified)
   max_users: z.number().min(1, {
     message: 'Maximum users must be at least 1.',
   }).optional(),
   max_storage: z.number().min(1, {
     message: 'Maximum storage must be at least 1GB.',
   }).optional(),
-  
-  // Description
   description: z.string().optional(),
-  
-  // Skip payment flag (for superadmin)
   skip_payment: z.boolean().default(true),
 });
 
 type OrganizationFormValues = z.infer<typeof organizationFormSchema>;
 
 const getPlanBadge = (planName?: string | null) => {
-  // Handle undefined or null planName
   if (!planName) {
     return <Badge className="bg-gray-100 text-gray-700">No Plan</Badge>;
   }
@@ -128,16 +115,17 @@ const getPlanBadge = (planName?: string | null) => {
 
 export function OrganizationManagementSection() {
   const [organizations, setOrganizations] = useState<Organization[]>([]);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [organizationToDelete, setOrganizationToDelete] = useState<Organization | null>(null);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [subscriptionPlans, setSubscriptionPlans] = useState<SubscriptionPlan[]>([]);
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
   const [planDurations, setPlanDurations] = useState<Record<string, PlanDuration[]>>({});
   
-  // Type guard to check if a value is a valid plan ID
   const isValidPlanId = (id: string | null): id is string => {
     return id !== null && id in planDurations;
   };
   
-  // Get the selected plan object with type guard
   const getSelectedPlan = (): SubscriptionPlan | null => {
     if (!selectedPlanId) return null;
     const plan = subscriptionPlans.find(p => p && p.id.toString() === selectedPlanId);
@@ -156,7 +144,6 @@ export function OrganizationManagementSection() {
   const [totalItems, setTotalItems] = useState(0);
   const { toast } = useToast();
   
-  // Fetch subscription plans when component mounts
   useEffect(() => {
     const fetchPlans = async () => {
       try {
@@ -186,7 +173,6 @@ export function OrganizationManagementSection() {
         console.log('Fetched plans:', plans);
         setSubscriptionPlans(plans);
         
-        // Fetch durations for each plan
         const durations: Record<string, PlanDuration[]> = {};
         for (const plan of plans) {
           try {
@@ -207,7 +193,6 @@ export function OrganizationManagementSection() {
         
         setPlanDurations(durations);
         
-        // Select the first plan by default if available
         if (plans.length > 0) {
           setSelectedPlanId(plans[0].id.toString());
         }
@@ -222,12 +207,8 @@ export function OrganizationManagementSection() {
     };
     
     fetchPlans();
-  }, []);
+  }, [toast]);
   
-  // Get the selected plan object
-  const selectedPlan = selectedPlanId ? subscriptionPlans.find(p => p.id.toString() === selectedPlanId) : null;
-  
-  // Form
   const form = useForm<OrganizationFormValues>({
     resolver: zodResolver(organizationFormSchema),
     defaultValues: {
@@ -245,18 +226,7 @@ export function OrganizationManagementSection() {
       skip_payment: true,
     },
   });
-  
-  // Handle plan selection
-  const handlePlanSelect = (planId: string) => {
-    setSelectedPlanId(planId);
-    // Reset form values when plan changes
-    form.setValue('plan_id', planId);
-    form.setValue('plan_duration', '');
-    form.setValue('max_users', 10); // Default value
-    form.setValue('max_storage', 10 * 1024 * 1024 * 1024); // Default value in bytes (10GB)
-  };
 
-  // Update form when plan durations are loaded
   useEffect(() => {
     if (selectedPlanId && planDurations[selectedPlanId]?.length > 0) {
       const defaultDuration = planDurations[selectedPlanId].find(d => d.is_default) || planDurations[selectedPlanId][0];
@@ -268,18 +238,15 @@ export function OrganizationManagementSection() {
     }
   }, [selectedPlanId, planDurations, form]);
   
-  // Handle form submission
   const handleCreateOrganization = async (values: OrganizationFormValues) => {
     try {
       setIsSubmitting(true);
       
-      // Get the selected plan
       const plan = subscriptionPlans.find(p => p.id.toString() === values.plan_id);
       if (!plan) {
         throw new Error('Selected plan not found');
       }
       
-      // Get the selected duration
       const selectedDuration = planDurations[values.plan_id]?.find(
         d => d.id.toString() === values.plan_duration
       );
@@ -288,12 +255,6 @@ export function OrganizationManagementSection() {
         throw new Error('Selected duration not found');
       }
       
-      // Calculate end date based on duration
-      const startDate = new Date();
-      const endDate = new Date();
-      endDate.setMonth(startDate.getMonth() + selectedDuration.duration_months);
-      
-      // Create organization with plan details
       const organizationData = {
         name: values.name.trim(),
         email: values.email.trim().toLowerCase(),
@@ -305,20 +266,17 @@ export function OrganizationManagementSection() {
         description: values.description,
         phone_number: values.phone_number?.trim() || '',
         website: values.website || '',
-        skip_payment: true, // Skip payment for superadmin
+        skip_payment: true,
       };
       
       const organization = await createOrganization(organizationData);
       
-      // Update the organizations list
       setOrganizations(prev => [organization, ...prev]);
       
-      // Close the dialog and reset form
       setIsCreateDialogOpen(false);
       form.reset();
       setSelectedPlanId(null);
       
-      // Show success message
       toast({
         title: 'Success',
         description: 'Organization created successfully with subscription.',
@@ -336,13 +294,11 @@ export function OrganizationManagementSection() {
     }
   };
 
-  // Fetch data
   useEffect(() => {
     const fetchData = async () => {
       try {
         setLoading(true);
         
-        // Fetch organizations
         const orgs = await fetchOrganizations({
           page: pagination.pageIndex + 1,
           pageSize: pagination.pageSize,
@@ -354,7 +310,6 @@ export function OrganizationManagementSection() {
         setOrganizations(orgs.organizations);
         setTotalItems(orgs.total);
         
-        // Fetch subscription plans
         const { data: plans, error: plansError } = await fetchSubscriptionPlans();
         
         if (plansError || !plans) {
@@ -369,7 +324,6 @@ export function OrganizationManagementSection() {
         
         setSubscriptionPlans(plans);
         
-        // Fetch durations for each plan
         const durations: Record<string, PlanDuration[]> = {};
         for (const plan of plans) {
           try {
@@ -387,7 +341,6 @@ export function OrganizationManagementSection() {
         
         setPlanDurations(durations);
         
-        // Set the first plan as selected by default
         if (plans.length > 0) {
           const firstPlanId = plans[0].id.toString();
           setSelectedPlanId(firstPlanId);
@@ -410,9 +363,8 @@ export function OrganizationManagementSection() {
     }, 300);
 
     return () => clearTimeout(debounceTimer);
-  }, [pagination, searchQuery, statusFilter, toast]);
+  }, [pagination, searchQuery, statusFilter, toast, form]);
 
-  // Handle pagination change
   const handlePaginationChange = (pageIndex: number, pageSize: number) => {
     setPagination(prev => ({
       ...prev,
@@ -421,19 +373,16 @@ export function OrganizationManagementSection() {
     }));
   };
 
-  // Handle search
   const handleSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
     setSearchQuery(e.target.value);
     setPagination(prev => ({ ...prev, pageIndex: 0 }));
   };
 
-  // Handle status filter change
   const handleStatusFilterChange = (status: string) => {
     setStatusFilter(status);
     setPagination(prev => ({ ...prev, pageIndex: 0 }));
   };
 
-  // Helper function to get row data
   const getRowData = (row: Row<Organization>): Organization => row.original;
 
   const columns: DataTableColumnDef<Organization>[] = [
@@ -443,7 +392,7 @@ export function OrganizationManagementSection() {
       accessorFn: (row) => row.name,
       cell: ({ row }) => {
         const data = getRowData(row);
-        const planName = data.plan; // Using the legacy plan field for now
+        const planName = data.plan;
         return (
           <div className="flex items-center space-x-3">
             <Avatar className="h-8 w-8">
@@ -542,38 +491,44 @@ export function OrganizationManagementSection() {
       id: 'actions',
       header: 'Actions',
       cell: ({ row }) => {
-      const data = getRowData(row);
-      return (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" className="h-8 w-8 p-0">
-              <span className="sr-only">Open menu</span>
-              <MoreHorizontal className="h-4 w-4" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuLabel>Actions</DropdownMenuLabel>
-            <DropdownMenuItem
-              onClick={() => navigator.clipboard.writeText(data.id)}
-            >
-              Copy organization ID
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem>View organization</DropdownMenuItem>
-            <DropdownMenuItem>Edit organization</DropdownMenuItem>
-            <DropdownMenuItem className="text-red-600">
-              Delete organization
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      );
+        const data = getRowData(row);
+        return (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" className="h-8 w-8 p-0">
+                <span className="sr-only">Open menu</span>
+                <MoreHorizontal className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuLabel>Actions</DropdownMenuLabel>
+              <DropdownMenuItem
+                onClick={() => navigator.clipboard.writeText(data.id)}
+              >
+                Copy organization ID
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem>View organization</DropdownMenuItem>
+              <DropdownMenuItem>Edit organization</DropdownMenuItem>
+              <DropdownMenuItem 
+                className="text-red-600"
+                onSelect={(e) => {
+                  e.preventDefault();
+                  setOrganizationToDelete(data);
+                  setIsDeleteDialogOpen(true);
+                }}
+              >
+                Delete organization
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        );
+      },
     },
-  },
-];
+  ];
 
-return (
-  <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
-
+  return (
+    <>
       <Card className="shadow-sm">
         <CardHeader className="pb-3">
           <div className="flex flex-col space-y-4 md:space-y-0 md:flex-row md:items-center md:justify-between">
@@ -594,11 +549,11 @@ return (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="outline" className="whitespace-nowrap">
-                    {statusFilter ? `Status: ${statusFilter}` : 'Filter by status'}
+                    {statusFilter && statusFilter !== 'all' ? `Status: ${statusFilter}` : 'Filter by status'}
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
-                  <DropdownMenuItem onClick={() => handleStatusFilterChange('')}>
+                  <DropdownMenuItem onClick={() => handleStatusFilterChange('all')}>
                     All Statuses
                   </DropdownMenuItem>
                   <DropdownMenuItem onClick={() => handleStatusFilterChange('active')}>
@@ -615,12 +570,10 @@ return (
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
-              <DialogTrigger asChild>
-                <Button>
-                  <Plus className="mr-2 h-4 w-4" />
-                  Add Organization
-                </Button>
-              </DialogTrigger>
+              <Button onClick={() => setIsCreateDialogOpen(true)}>
+                <Plus className="mr-2 h-4 w-4" />
+                Add Organization
+              </Button>
             </div>
           </div>
         </CardHeader>
@@ -638,16 +591,14 @@ return (
               </div>
               <h3 className="text-lg font-medium mb-1">No organizations found</h3>
               <p className="text-muted-foreground text-sm mb-4">
-                {searchQuery || statusFilter
+                {searchQuery || (statusFilter && statusFilter !== 'all')
                   ? 'Try adjusting your search or filter criteria'
                   : 'Get started by adding a new organization'}
               </p>
-              <DialogTrigger asChild>
-                <Button>
-                  <Plus className="mr-2 h-4 w-4" />
-                  Add Organization
-                </Button>
-              </DialogTrigger>
+              <Button onClick={() => setIsCreateDialogOpen(true)}>
+                <Plus className="mr-2 h-4 w-4" />
+                Add Organization
+              </Button>
             </div>
           ) : (
             <DataTable
@@ -664,179 +615,179 @@ return (
         </CardContent>
       </Card>
 
-      {/* Add Organization Dialog */}
-      <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col">
-        <DialogHeader className="px-1">
-          <DialogTitle>Create Organization</DialogTitle>
-          <DialogDescription>
-            Add a new organization to the platform. All fields marked with * are required.
-          </DialogDescription>
-        </DialogHeader>
-        
-        <Form {...form}>
-          <form onSubmit={form.handleSubmit(handleCreateOrganization)} className="flex-1 flex flex-col overflow-hidden">
-            <div className="flex-1 overflow-y-auto pr-2 space-y-4 py-2">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <FormField
-                  control={form.control}
-                  name="name"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Organization Name *</FormLabel>
-                      <FormControl>
-                        <Input placeholder="Acme Inc." {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                
-                <FormField
-                  control={form.control}
-                  name="slug"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>URL Slug *</FormLabel>
-                      <FormControl>
-                        <div className="flex items-center">
-                          <span className="text-sm text-muted-foreground mr-2 whitespace-nowrap">
-                            {typeof window !== 'undefined' ? window.location.hostname.split('.')[0] : 'app'}.example.com/
-                          </span>
-                          <Input placeholder="acme-inc" {...field} />
-                        </div>
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <FormField
-                  control={form.control}
-                  name="email"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Email *</FormLabel>
-                      <FormControl>
-                        <Input placeholder="contact@example.com" type="email" {...field} value={field.value || ''} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                
-                <FormField
-                  control={form.control}
-                  name="phone_number"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Phone Number</FormLabel>
-                      <FormControl>
-                        <Input placeholder="+1 (555) 123-4567" {...field} value={field.value || ''} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </div>
-              
-              <FormField
-                control={form.control}
-                name="website"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Website</FormLabel>
-                    <FormControl>
-                      <Input placeholder="https://example.com" {...field} value={field.value || ''} />
-                    </FormControl>
-                    <FormDescription className="text-xs">
-                      Include https:// in the URL
-                    </FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <FormField
-                  control={form.control}
-                  name="status"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Status</FormLabel>
-                      <Select onValueChange={field.onChange} defaultValue={field.value}>
+      <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+        <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col">
+          <DialogHeader className="px-1">
+            <DialogTitle>Create Organization</DialogTitle>
+            <DialogDescription>
+              Add a new organization to the platform. All fields marked with * are required.
+            </DialogDescription>
+          </DialogHeader>
+          
+          <Form {...form}>
+            <form onSubmit={form.handleSubmit(handleCreateOrganization)} className="flex-1 flex flex-col overflow-hidden">
+              <div className="flex-1 overflow-y-auto pr-2 space-y-4 py-2">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <FormField
+                    control={form.control}
+                    name="name"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Organization Name *</FormLabel>
                         <FormControl>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select status" />
-                          </SelectTrigger>
+                          <Input placeholder="Acme Inc." {...field} />
                         </FormControl>
-                        <SelectContent>
-                          <SelectItem value="active">Active</SelectItem>
-                          <SelectItem value="trial">Trial</SelectItem>
-                          <SelectItem value="suspended">Suspended</SelectItem>
-                          <SelectItem value="inactive">Inactive</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  
+                  <FormField
+                    control={form.control}
+                    name="slug"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>URL Slug *</FormLabel>
+                        <FormControl>
+                          <div className="flex items-center">
+                            <span className="text-sm text-muted-foreground mr-2 whitespace-nowrap">
+                              {typeof window !== 'undefined' ? window.location.hostname.split('.')[0] : 'app'}.example.com/
+                            </span>
+                            <Input placeholder="acme-inc" {...field} />
+                          </div>
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <FormField
+                    control={form.control}
+                    name="email"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Email *</FormLabel>
+                        <FormControl>
+                          <Input placeholder="contact@example.com" type="email" {...field} value={field.value || ''} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  
+                  <FormField
+                    control={form.control}
+                    name="phone_number"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Phone Number</FormLabel>
+                        <FormControl>
+                          <Input placeholder="+1 (555) 123-4567" {...field} value={field.value || ''} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
                 
                 <FormField
                   control={form.control}
-                  name="max_users"
+                  name="website"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Max Users</FormLabel>
+                      <FormLabel>Website</FormLabel>
                       <FormControl>
-                        <Input 
-                          type="number" 
-                          min="1" 
-                          {...field} 
-                          onChange={e => field.onChange(parseInt(e.target.value) || 1)}
-                        />
+                        <Input placeholder="https://example.com" {...field} value={field.value || ''} />
                       </FormControl>
+                      <FormDescription className="text-xs">
+                        Include https:// in the URL
+                      </FormDescription>
                       <FormMessage />
                     </FormItem>
                   )}
                 />
-              </div>
 
-              <div className="space-y-4">
-                <FormField
-                  control={form.control}
-                  name="plan_id"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Subscription Plan</FormLabel>
-                      <Select
-                        onValueChange={(value) => {
-                          field.onChange(value);
-                          setSelectedPlanId(value);
-                          
-                          // Reset duration when plan changes
-                          form.setValue('plan_duration', '');
-                        }}
-                        value={field.value?.toString()}
-                      >
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <FormField
+                    control={form.control}
+                    name="status"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Status</FormLabel>
+                        <Select onValueChange={field.onChange} defaultValue={field.value}>
+                          <FormControl>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select status" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            <SelectItem value="active">Active</SelectItem>
+                            <SelectItem value="trial">Trial</SelectItem>
+                            <SelectItem value="suspended">Suspended</SelectItem>
+                            <SelectItem value="inactive">Inactive</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  
+                  <FormField
+                    control={form.control}
+                    name="max_users"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Max Users</FormLabel>
                         <FormControl>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select a plan" />
-                          </SelectTrigger>
+                          <Input 
+                            type="number" 
+                            min="1" 
+                            {...field} 
+                            onChange={e => field.onChange(parseInt(e.target.value) || 1)}
+                          />
                         </FormControl>
-                        <SelectContent>
-                          {subscriptionPlans.map((plan) => (
-                            <SelectItem key={plan.id} value={plan.id.toString()}>
-                              {plan.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+
+                <div className="space-y-4">
+                  <FormField
+                    control={form.control}
+                    name="plan_id"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Subscription Plan</FormLabel>
+                        <Select
+                          onValueChange={(value) => {
+                            field.onChange(value);
+                            setSelectedPlanId(value);
+                            form.setValue('plan_duration', '');
+                          }}
+                          value={field.value?.toString()}
+                        >
+                          <FormControl>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select a plan" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {subscriptionPlans.map((plan) => (
+                              <SelectItem key={plan.id} value={plan.id.toString()}>
+                                {plan.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+
 
                 {isValidPlanId(selectedPlanId) && (
                   <div className="rounded-lg border p-4">
@@ -952,5 +903,60 @@ return (
         </Form>
       </DialogContent>
     </Dialog>
-  );
+
+    <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Delete Organization</DialogTitle>
+          <DialogDescription>
+            Are you sure you want to delete the organization "{organizationToDelete?.name}"? This action cannot be undone.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button 
+            variant="outline" 
+            onClick={() => setIsDeleteDialogOpen(false)}
+            disabled={isDeleting}
+          >
+            Cancel
+          </Button>
+          <Button 
+            variant="destructive" 
+            onClick={async () => {
+              if (!organizationToDelete) return;
+              
+              try {
+                setIsDeleting(true);
+                await deleteOrganization(organizationToDelete.id);
+                toast({
+                  title: 'Success',
+                  description: 'Organization deleted successfully',
+                });
+                
+                // Refresh the organizations list
+                const orgs = await fetchOrganizations();
+                setOrganizations(orgs.organizations);
+                
+                setIsDeleteDialogOpen(false);
+                setOrganizationToDelete(null);
+              } catch (error) {
+                console.error('Error deleting organization:', error);
+                toast({
+                  title: 'Error',
+                  description: error instanceof Error ? error.message : 'Failed to delete organization',
+                  variant: 'destructive',
+                });
+              } finally {
+                setIsDeleting(false);
+              }
+            }}
+            disabled={isDeleting}
+          >
+            {isDeleting ? 'Deleting...' : 'Delete'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+</>
+);
 };

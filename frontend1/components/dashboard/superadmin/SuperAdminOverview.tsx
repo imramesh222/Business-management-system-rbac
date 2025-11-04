@@ -1,6 +1,8 @@
 'use client';
 
 import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
+import { getCurrentUser } from '@/lib/auth';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
@@ -180,6 +182,48 @@ function SuperAdminOverview() {
   const [systemHealth, setSystemHealth] = useState<FrontendSystemHealth>(defaultSystemHealth);
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
   const [activities, setActivities] = useState<Array<ExtendedActivity>>([]);
+  const router = useRouter();
+  const user = getCurrentUser();
+
+  // Check if user is superadmin on component mount
+  useEffect(() => {
+    if (!user || !user.is_superuser) {
+      router.push('/unauthorized');
+      return;
+    }
+  }, [user, router]);
+
+  // Show loading state
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4" />
+          <p>Loading superadmin dashboard...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Show error state
+  if (error) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center text-red-500">
+          <AlertCircle className="h-8 w-8 mx-auto mb-4" />
+          <p>Error loading dashboard: {error}</p>
+          <Button 
+            variant="outline" 
+            className="mt-4"
+            onClick={() => window.location.reload()}
+          >
+            <RefreshCw className="mr-2 h-4 w-4" />
+            Retry
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   // Format relative time (e.g., '2 hours ago')
   const formatRelativeTime = useCallback((dateInput: Date | string): string => {

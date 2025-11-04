@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { usePathname, useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { 
   Users, 
@@ -24,6 +25,24 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getCurrentUserWithFallback, UserRole, getRoleDisplayName } from '@/lib/auth';
+
+// Type guard function to check if a string is a valid UserRole
+const isUserRole = (role: string): role is UserRole => {
+  return [
+    'superadmin',
+    'admin',
+    'organization_admin',
+    'project_manager',
+    'manager',
+    'developer',
+    'sales',
+    'support',
+    'verifier',
+    'user',
+    'organization',
+    'org_admin'
+  ].includes(role);
+};
 
 interface RoleBasedLayoutProps {
   children: React.ReactNode;
@@ -91,12 +110,32 @@ const getNavigationForRole = (role: UserRole) => {
       { name: 'History', href: '/history', icon: FileText, current: false },
       { name: 'Statistics', href: '/stats', icon: BarChart3, current: false },
     ],
-    // Default navigation for users with 'user' role or any other undefined role
+    // Default navigation for regular users
     user: [
-      { name: 'Dashboard', href: '/dashboard', icon: Home, current: true },
-      { name: 'Profile', href: '/profile', icon: UserCheck, current: false },
-      { name: 'My Tasks', href: '/my-tasks', icon: CheckSquare, current: false },
-      { name: 'Calendar', href: '/calendar', icon: Calendar, current: false },
+      { name: 'My Dashboard', href: '/organization/user/dashboard', icon: Home, current: true },
+      { name: 'My Tasks', href: '/organization/user/tasks', icon: CheckSquare, current: false },
+      { name: 'Projects', href: '/organization/user/projects', icon: FolderOpen, current: false },
+      { name: 'Calendar', href: '/organization/user/calendar', icon: Calendar, current: false },
+      { name: 'Profile', href: '/organization/user/profile', icon: UserCheck, current: false },
+    ],
+    
+    // Project manager navigation
+    project_manager: [
+      { name: 'Dashboard', href: '/manager/dashboard', icon: Home, current: true },
+      { name: 'Projects', href: '/manager/projects', icon: FolderOpen, current: false },
+      { name: 'Tasks', href: '/manager/tasks', icon: CheckSquare, current: false },
+      { name: 'Team', href: '/manager/team', icon: Users, current: false },
+      { name: 'Calendar', href: '/manager/calendar', icon: Calendar, current: false },
+      { name: 'Reports', href: '/manager/reports', icon: BarChart3, current: false },
+    ],
+    
+    // Salesperson navigation
+    salesperson: [
+      { name: 'Dashboard', href: '/sales/dashboard', icon: Home, current: true },
+      { name: 'Leads', href: '/sales/leads', icon: UserCheck, current: false },
+      { name: 'Deals', href: '/sales/deals', icon: DollarSign, current: false },
+      { name: 'Calendar', href: '/sales/calendar', icon: Calendar, current: false },
+      { name: 'Targets', href: '/sales/targets', icon: BarChart3, current: false },
     ],
   };
 
@@ -106,12 +145,21 @@ const getNavigationForRole = (role: UserRole) => {
 };
 
 export function RoleBasedLayout({ children }: RoleBasedLayoutProps) {
+  const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const currentUser = getCurrentUserWithFallback();
-  const pathname = typeof window !== 'undefined' ? window.location.pathname : '';
-  
-  // Show loading state if user is not available
-  if (!currentUser) {
+  const pathname = usePathname();
+  const user = getCurrentUserWithFallback();
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    if (!user) {
+      router.push('/login');
+    } else {
+      setIsLoading(false);
+    }
+  }, [user, router]);
+
+  if (isLoading || !user) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gray-50">
         <div className="text-center">
@@ -121,46 +169,17 @@ export function RoleBasedLayout({ children }: RoleBasedLayoutProps) {
       </div>
     );
   }
+
+  // Safely get the user's role
+  const getUserRole = (): UserRole => {
+    const role = (user.organization_role || user.role || 'user').toLowerCase();
+    return isUserRole(role) ? role : 'user';
+  };
+
+  const layoutRole = getUserRole();
   
-  // Get navigation items and update current based on pathname
-  const navigation = getNavigationForRole(currentUser.role).map(item => {
-    // Special handling for organization dashboard
-    if (item.href === '/organization/dashboard') {
-      const isOrgDashboard = pathname === '/organization/dashboard' || 
-                          (pathname.startsWith('/organization/') && 
-                          !pathname.startsWith('/organization/members') &&
-                          !pathname.startsWith('/organization/projects') &&
-                          !pathname.startsWith('/organization/billing') &&
-                          !pathname.startsWith('/organization/settings') &&
-                          !pathname.startsWith('/organization/reports'));
-      
-      return {
-        ...item,
-        current: isOrgDashboard
-      };
-    }
-    
-    // Special handling for superadmin dashboard
-    if (item.href === '/superadmin') {
-      const isSuperadminDashboard = pathname === '/superadmin' || 
-                                 (pathname.startsWith('/superadmin/') && 
-                                 !pathname.startsWith('/superadmin/users') &&
-                                 !pathname.startsWith('/superadmin/organizations') &&
-                                 !pathname.startsWith('/superadmin/billing') &&
-                                 !pathname.startsWith('/superadmin/settings') &&
-                                 !pathname.startsWith('/superadmin/logs') &&
-                                 !pathname.startsWith('/superadmin/reports') &&
-                                 !pathname.startsWith('/superadmin/roles') &&
-                                 !pathname.startsWith('/superadmin/notifications') &&
-                                 !pathname.startsWith('/superadmin/maintenance'));
-      
-      return {
-        ...item,
-        current: isSuperadminDashboard
-      };
-    }
-    
-    // For all other items, use exact or startsWith matching
+  // Type assertion for navigation
+  const navigation = getNavigationForRole(layoutRole).map(item => {
     const isActive = pathname === item.href || 
                     (pathname.startsWith(item.href) && 
                      item.href !== '/' && 
@@ -168,18 +187,25 @@ export function RoleBasedLayout({ children }: RoleBasedLayoutProps) {
     
     return { ...item, current: isActive };
   });
+  
+  // Determine if the current role is an admin role
+  const isAdminRole = ['superadmin', 'admin', 'organization_admin'].includes(layoutRole);
+  
+  // Determine if the current role should use the simplified layout
+  const useSimplifiedLayout = ['user', 'salesperson', 'verifier', 'support', 'developer'].includes(layoutRole);
 
   const getRoleColor = (role: UserRole) => {
     const colors: Record<UserRole, string> = {
       superadmin: 'bg-purple-600',
       admin: 'bg-blue-600',
-      manager: 'bg-green-600',
+      project_manager: 'bg-green-600',
       developer: 'bg-orange-600',
-      sales: 'bg-pink-600',
+      salesperson: 'bg-pink-600',
       support: 'bg-teal-600',
-      verifier: 'bg-indigo-600'
+      verifier: 'bg-indigo-600',
+      user: 'bg-gray-600'
     };
-    return colors[role];
+    return colors[role] || 'bg-gray-500';
   };
 
   const handleLogout = () => {
@@ -191,95 +217,243 @@ export function RoleBasedLayout({ children }: RoleBasedLayoutProps) {
     }
   };
 
-  return (
-    <div className="flex h-screen bg-gray-50">
-      {/* Sidebar */}
-      <div className={cn(
-        "fixed inset-y-0 left-0 z-50 w-64 bg-white shadow-lg transform transition-transform duration-300 ease-in-out lg:translate-x-0 lg:static lg:inset-0",
-        sidebarOpen ? "translate-x-0" : "-translate-x-full"
-      )}>
-        <div className={cn("flex items-center justify-center h-16 px-4", getRoleColor(currentUser.role))}>
-          <h1 className="text-xl font-bold text-white">{getRoleDisplayName(currentUser.role)}</h1>
+  if (useSimplifiedLayout) {
+    return (
+      <div className="min-h-screen bg-gray-50">
+        {/* Mobile menu button */}
+        <div className="md:hidden fixed top-0 left-0 right-0 z-40 bg-white border-b border-gray-200 shadow-sm">
+          <div className="flex items-center justify-between h-14 px-4">
+            <button
+              type="button"
+              className="text-gray-500 hover:text-gray-600"
+              onClick={() => setSidebarOpen(true)}
+            >
+              <span className="sr-only">Open sidebar</span>
+              <Menu className="h-6 w-6" />
+            </button>
+            <div className="text-sm font-medium text-gray-900">
+              {typeof user.organization === 'object' && user.organization !== null 
+                ? user.organization.name 
+                : 'My Workspace'}
+            </div>
+            <div className="w-6"></div> {/* Spacer for alignment */}
+          </div>
         </div>
-        
-        <nav className="mt-8 px-4">
-          <ul className="space-y-2">
-            {navigation.map((item) => (
-              <li key={item.name}>
+
+        {/* Sidebar */}
+        <div className={cn(
+          "fixed inset-y-0 left-0 z-50 w-64 transform bg-white border-r border-gray-200 overflow-y-auto",
+          "transition-transform duration-300 ease-in-out",
+          sidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"
+        )}>
+          <div className="flex flex-col h-full">
+            {/* Logo and close button */}
+            <div className="flex items-center justify-between h-16 px-4 border-b border-gray-200">
+              <div className="flex items-center">
+                <span className="text-lg font-semibold text-gray-800">
+                  {typeof user.organization === 'object' ? user.organization.name : 'My Workspace'}
+                </span>
+              </div>
+              <button
+                type="button"
+                className="md:hidden text-gray-500 hover:text-gray-600"
+                onClick={() => setSidebarOpen(false)}
+              >
+                <span className="sr-only">Close sidebar</span>
+                <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Navigation */}
+            <nav className="flex-1 px-2 py-4 space-y-1">
+              {navigation.map((item) => (
                 <a
+                  key={item.name}
                   href={item.href}
                   className={cn(
-                    "flex items-center px-4 py-3 text-sm font-medium rounded-lg transition-colors duration-200",
-                    item.current
-                      ? "bg-blue-50 text-blue-700 border-r-2 border-blue-600"
-                      : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+                    'group flex items-center px-3 py-2.5 text-sm font-medium rounded-md',
+                    item.current 
+                      ? 'bg-blue-50 text-blue-600' 
+                      : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
                   )}
                 >
-                  <item.icon className="mr-3 h-5 w-5" />
+                  <item.icon
+                    className={cn(
+                      'mr-3 h-5 w-5',
+                      item.current ? 'text-blue-500' : 'text-gray-400 group-hover:text-gray-500'
+                    )}
+                    aria-hidden="true"
+                  />
                   {item.name}
                 </a>
-              </li>
-            ))}
-          </ul>
-        </nav>
-        
-        <div className="absolute bottom-0 w-full p-4">
-          <Button 
-            variant="ghost" 
-            className="w-full justify-start text-red-600 hover:text-red-700 hover:bg-red-50"
-            onClick={handleLogout}
-          >
-            <LogOut className="mr-3 h-5 w-5" />
-            Logout
-          </Button>
-        </div>
-      </div>
+              ))}
+            </nav>
 
-      {/* Main content */}
-      <div className="flex-1 flex flex-col overflow-hidden lg:ml-0">
-        {/* Top bar */}
-        <header className="bg-white shadow-sm border-b border-gray-200">
-          <div className="flex items-center justify-between h-16 px-4 sm:px-6 lg:px-8">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="lg:hidden"
-              onClick={() => setSidebarOpen(!sidebarOpen)}
-            >
-              <Menu className="h-6 w-6" />
-            </Button>
-            
-            <div className="flex items-center space-x-4">
-              <div className="relative">
-                <Bell className="h-6 w-6 text-gray-400" />
-                <span className="absolute -top-1 -right-1 h-3 w-3 bg-red-500 rounded-full"></span>
-              </div>
-              <div className="flex items-center space-x-2">
-                <div className={cn("h-8 w-8 rounded-full flex items-center justify-center", getRoleColor(currentUser.role))}>
-                  <span className="text-white text-sm font-medium">{currentUser.avatar}</span>
+            {/* User profile */}
+            <div className="p-4 border-t border-gray-200">
+              <div className="flex items-center">
+                <div className="flex-shrink-0">
+                  <span className={cn(
+                    'inline-flex items-center justify-center h-9 w-9 rounded-full',
+                    getRoleColor(layoutRole as UserRole) || 'bg-gray-400'
+                  )}>
+                    <span className="text-white font-medium">
+                      {user.name ? user.name.charAt(0).toUpperCase() : 'U'}
+                    </span>
+                  </span>
                 </div>
-                <div className="hidden sm:block">
-                  <span className="text-sm font-medium text-gray-700">{currentUser.name}</span>
-                  <p className="text-xs text-gray-500">{getRoleDisplayName(currentUser.role)}</p>
+                <div className="ml-3">
+                  <p className="text-sm font-medium text-gray-700">{user.name || 'User'}</p>
+                  <p className="text-xs text-gray-500">{getRoleDisplayName(layoutRole as UserRole)}</p>
+                </div>
+                <div className="ml-auto">
+                  <button
+                    onClick={handleLogout}
+                    className="text-gray-400 hover:text-gray-500"
+                    title="Sign out"
+                  >
+                    <LogOut className="h-5 w-5" />
+                  </button>
                 </div>
               </div>
             </div>
           </div>
-        </header>
+        </div>
 
-        {/* Page content */}
-        <main className="flex-1 overflow-auto">
-          {children}
-        </main>
+        {/* Main content */}
+        <div className="md:pl-64 pt-14 min-h-screen">
+          <main className="p-4 md:p-6">
+            {children}
+          </main>
+        </div>
       </div>
+    );
+  }
 
-      {/* Sidebar backdrop */}
+  // Admin layout (original layout)
+  return (
+    <div className="min-h-screen bg-gray-50">
+      {/* Sidebar backdrop for mobile */}
       {sidebarOpen && (
         <div
           className="fixed inset-0 z-40 bg-gray-600 bg-opacity-75 lg:hidden"
           onClick={() => setSidebarOpen(false)}
         />
       )}
+
+      {/* Sidebar */}
+      <div className={cn(
+        "fixed inset-y-0 left-0 z-50 w-64 transform",
+        "bg-white border-r border-gray-200 overflow-y-auto",
+        "transition-transform duration-300 ease-in-out",
+        sidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"
+      )}>
+        <div className="flex flex-col h-full">
+          {/* Logo and close button */}
+          <div className="flex items-center justify-between h-16 px-4 border-b border-gray-200">
+            <div className="flex items-center">
+              <span className="text-xl font-semibold text-gray-800">
+                {isAdminRole ? 'Admin' : 'Manager'} Dashboard
+              </span>
+            </div>
+            <button
+              type="button"
+              className="md:hidden text-gray-500 hover:text-gray-600"
+              onClick={() => setSidebarOpen(false)}
+            >
+              <span className="sr-only">Close sidebar</span>
+              <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+
+          {/* Navigation */}
+          <nav className="flex-1 px-2 py-4 space-y-1">
+            {navigation.map((item) => (
+              <a
+                key={item.name}
+                href={item.href}
+                className={cn(
+                  item.current
+                    ? 'bg-gray-100 text-gray-900'
+                    : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900',
+                  'group flex items-center px-3 py-2 text-sm font-medium rounded-md'
+                )}
+              >
+                <item.icon
+                  className={cn(
+                    item.current ? 'text-gray-500' : 'text-gray-400 group-hover:text-gray-500',
+                    'mr-3 h-6 w-6'
+                  )}
+                  aria-hidden="true"
+                />
+                {item.name}
+              </a>
+            ))}
+          </nav>
+
+          {/* User profile */}
+          <div className="p-4 border-t border-gray-200">
+            <div className="flex items-center">
+              <div className="flex-shrink-0">
+                <span className={cn(
+                  'inline-flex items-center justify-center h-10 w-10 rounded-full',
+                  getRoleColor(layoutRole) || 'bg-gray-400'
+                )}>
+                  <span className="text-white font-medium">
+                    {user.name ? user.name.charAt(0).toUpperCase() : 'U'}
+                  </span>
+                </span>
+              </div>
+              <div className="ml-3">
+                <p className="text-sm font-medium text-gray-700">{user.name || 'User'}</p>
+                <p className="text-xs text-gray-500">{getRoleDisplayName(layoutRole)}</p>
+              </div>
+              <div className="ml-auto">
+                <button
+                  onClick={handleLogout}
+                  className="text-gray-400 hover:text-gray-500"
+                  title="Sign out"
+                >
+                  <LogOut className="h-5 w-5" />
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Mobile menu button */}
+      <div className="md:hidden fixed top-0 left-0 right-0 z-40">
+        <div className="bg-white border-b border-gray-200">
+          <div className="flex items-center justify-between h-16 px-4">
+            <button
+              type="button"
+              className="text-gray-500 hover:text-gray-600"
+              onClick={() => setSidebarOpen(true)}
+            >
+              <span className="sr-only">Open sidebar</span>
+              <Menu className="h-6 w-6" />
+            </button>
+            <div className="flex items-center">
+              <h1 className="text-lg font-semibold text-gray-800">
+                {isAdminRole ? 'Admin' : 'Manager'} Dashboard
+              </h1>
+            </div>
+            <div className="w-6"></div> {/* Spacer for alignment */}
+          </div>
+        </div>
+      </div>
+
+      {/* Main content */}
+      <div className="md:pl-64 pt-16 min-h-screen">
+        <main className="p-6">
+          {children}
+        </main>
+      </div>
     </div>
   );
 }

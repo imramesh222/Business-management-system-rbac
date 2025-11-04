@@ -42,8 +42,13 @@ const LoginForm = () => {
   const [rememberMe, setRememberMe] = useState(false);
   const [mounted, setMounted] = useState(false);
 
-  // Animation state
+  // Clear any existing tokens and set up the form
   useEffect(() => {
+    // Clear any existing tokens
+    localStorage.removeItem('access_token');
+    localStorage.removeItem('refresh_token');
+    
+    // Set mounted state for animations
     setMounted(true);
     
     // Check for remembered credentials
@@ -107,28 +112,58 @@ const LoginForm = () => {
       });
       
       // Get user role or default to 'user'
-      const userRole = user?.role || 'user';
+      const userRole = (user?.organization_role || user?.role || 'user').toLowerCase();
       
       // Map role to dashboard path with debug logging
       const getDashboardPath = (role: string): string => {
         console.log('User role detected:', role);
         
-        const paths: Record<string, string> = {
-          'superadmin': '/superadmin',
+        // Normalize role names to match the ones in the JWT token
+        const normalizedRole = role.toLowerCase().replace(/[^a-z0-9]/g, '_');
+        
+        // Define role to path mappings
+        const roleMappings: Record<string, string> = {
+          // Super Admin
+          'superadmin': '/superadmin/dashboard',
+          'super_admin': '/superadmin/dashboard',
+          
+          // Organization Admin/Manager
           'admin': '/organization/dashboard',
           'organization_admin': '/organization/dashboard',
-          'manager': '/dashboard',
-          'developer': '/dashboard',
-          'sales': '/dashboard',
-          'support': '/dashboard',
-          'verifier': '/dashboard',
-          'user': '/dashboard',
-          'organization': '/organization/dashboard',  // Additional common role name
-          'org_admin': '/organization/dashboard'      // Another common role name
+          'org_admin': '/organization/dashboard',
+          'organization': '/organization/dashboard',
+          
+          // Project Manager
+          'project_manager': '/organization/project-manager/dashboard',
+          'projectmanager': '/organization/project-manager/dashboard',
+          'pmanager': '/organization/project-manager/dashboard',
+          
+          // Developer
+          'developer': '/organization/developer/dashboard',
+          'dev': '/organization/developer/dashboard',
+          
+          // Sales
+          'sales': '/organization/sales/dashboard',
+          'salesperson': '/organization/sales/dashboard',
+          'sales_rep': '/organization/sales/dashboard',
+          
+          // Support
+          'support': '/organization/support/dashboard',
+          'support_agent': '/organization/support/dashboard',
+          
+          // Verifier
+          'verifier': '/organization/verifier/dashboard',
+          'verification': '/organization/verifier/dashboard',
+          
+          // Default user role
+          'user': '/organization/user/dashboard',
+          'member': '/organization/user/dashboard',
+          'default': '/organization/user/dashboard'
         };
         
-        const path = paths[role.toLowerCase()] || '/dashboard';
-        console.log('Redirecting to:', path);
+        // Find the matching path or default to user dashboard
+        const path = roleMappings[normalizedRole] || '/organization/user/dashboard';
+        console.log(`Mapped role '${role}' (normalized: '${normalizedRole}') to path:`, path);
         return path;
       };
       

@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -9,43 +10,38 @@ import {
   CheckSquare, 
   Users, 
   Calendar,
-  TrendingUp,
   Clock,
   AlertTriangle,
-  Target
+  Target,
+  Loader2
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from 'recharts';
+import { fetchProjectManagerDashboard } from '@/services/projectManagerService';
+import { ProjectManagerDashboardData, ProjectManagerProject, ProjectManagerTask } from '@/types/project-manager';
 
-const metrics = [
-  {
-    title: 'Active Projects',
-    value: '8',
-    change: '+2 this month',
-    changeType: 'positive',
-    icon: FolderOpen,
-  },
-  {
-    title: 'Total Tasks',
-    value: '127',
-    change: '+15 this week',
-    changeType: 'positive',
-    icon: CheckSquare,
-  },
-  {
-    title: 'Team Members',
-    value: '12',
-    change: '+1 new member',
-    changeType: 'positive',
-    icon: Users,
-  },
-  {
-    title: 'On-Time Delivery',
-    value: '94%',
-    change: '+3% improvement',
-    changeType: 'positive',
-    icon: Target,
-  },
-];
+const getStatusColor = (status: string) => {
+  switch (status.toLowerCase()) {
+    case 'in_progress':
+      return 'bg-blue-100 text-blue-800';
+    case 'completed':
+      return 'bg-green-100 text-green-800';
+    case 'on_hold':
+      return 'bg-yellow-100 text-yellow-800';
+    case 'cancelled':
+      return 'bg-red-100 text-red-800';
+    default:
+      return 'bg-gray-100 text-gray-800';
+  }
+};
+
+const formatDate = (dateString: string | null) => {
+  if (!dateString) return 'No deadline';
+  return new Date(dateString).toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  });
+};
 
 const projectProgressData = [
   { name: 'E-commerce Platform', progress: 85, deadline: '2024-02-15', status: 'on-track' },
@@ -77,97 +73,203 @@ const upcomingDeadlines = [
   { project: 'API Integration', task: 'Data Migration', deadline: '2024-01-25', priority: 'low' },
 ];
 
-export function ManagerOverview() {
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'on-track': return 'text-green-600 bg-green-100';
-      case 'at-risk': return 'text-yellow-600 bg-yellow-100';
-      case 'delayed': return 'text-red-600 bg-red-100';
-      default: return 'text-gray-600 bg-gray-100';
-    }
-  };
+export default function ManagerOverview() {
+  const [dashboardData, setDashboardData] = useState<ProjectManagerDashboardData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const getPriorityColor = (priority: string) => {
-    switch (priority) {
-      case 'high': return 'text-red-600 bg-red-100';
-      case 'medium': return 'text-yellow-600 bg-yellow-100';
-      case 'low': return 'text-green-600 bg-green-100';
-      default: return 'text-gray-600 bg-gray-100';
-    }
-  };
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        setLoading(true);
+        const data = await fetchProjectManagerDashboard();
+        setDashboardData(data);
+      } catch (err) {
+        console.error('Error fetching dashboard data:', err);
+        setError('Failed to load dashboard data');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchData();
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <span className="ml-2">Loading dashboard...</span>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="p-4 text-red-500 bg-red-50 rounded-md">
+        <AlertTriangle className="inline-block w-5 h-5 mr-2" />
+        {error}
+      </div>
+    );
+  }
+
+  if (!dashboardData) {
+    return (
+      <div className="p-4 text-gray-500 bg-gray-50 rounded-md">
+        No data available
+      </div>
+    );
+  }
+
+  const { stats, projects, recent_tasks } = dashboardData;
+
+  // Prepare metrics for the top cards
+  const metrics = [
+    {
+      title: 'Total Projects',
+      value: stats.total_projects.toString(),
+      change: `${stats.active_projects} active`,
+      changeType: 'positive',
+      icon: FolderOpen,
+    },
+    {
+      title: 'Team Members',
+      value: stats.total_team_members.toString(),
+      change: `${stats.active_projects} active projects`,
+      changeType: 'positive',
+      icon: Users,
+    },
+    {
+      title: 'Tasks In Progress',
+      value: stats.in_progress_tasks.toString(),
+      change: `${stats.completed_tasks} completed`,
+      changeType: 'positive',
+      icon: CheckSquare,
+    },
+    {
+      title: 'Pending Tasks',
+      value: stats.pending_tasks.toString(),
+      change: 'Needs attention',
+      changeType: stats.pending_tasks > 5 ? 'negative' : 'positive',
+      icon: AlertTriangle,
+    },
+  ];
 
   return (
-    <div className="p-6 space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold text-gray-900">Project Manager Dashboard</h1>
-        <p className="mt-2 text-gray-600">Monitor project progress and manage your team's workload</p>
-      </div>
-
-      {/* Metrics Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+    <div className="space-y-6">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         {metrics.map((metric) => (
-          <Card key={metric.title} className="hover:shadow-lg transition-shadow duration-200">
+          <Card key={metric.title}>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium text-gray-600">
+              <CardTitle className="text-sm font-medium">
                 {metric.title}
               </CardTitle>
-              <metric.icon className="h-4 w-4 text-gray-400" />
+              <div className={`p-2 rounded-md ${metric.changeType === 'positive' ? 'bg-green-100' : 'bg-red-100'}`}>
+                <metric.icon className={`h-4 w-4 ${metric.changeType === 'positive' ? 'text-green-600' : 'text-red-600'}`} />
+              </div>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-gray-900">{metric.value}</div>
-              <p className="text-xs text-green-600 mt-1">{metric.change}</p>
+              <div className="text-2xl font-bold">{metric.value}</div>
+              <p className="text-xs text-muted-foreground">
+                {metric.change}
+              </p>
             </CardContent>
           </Card>
         ))}
       </div>
 
       {/* Project Progress and Team Workload */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card>
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
+        <Card className="col-span-4">
           <CardHeader>
-            <CardTitle>Project Progress</CardTitle>
-            <CardDescription>Current status of active projects</CardDescription>
+            <CardTitle>Projects Overview</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              {projectProgressData.map((project) => (
-                <div key={project.name} className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium text-gray-900">{project.name}</span>
+              {projects.map((project) => (
+                <div key={project.id} className="border rounded-lg p-4">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <h3 className="font-medium">{project.title}</h3>
+                      <p className="text-sm text-muted-foreground">
+                        Client: {project.client?.name || 'No client'}
+                      </p>
+                    </div>
                     <Badge className={getStatusColor(project.status)}>
-                      {project.status.replace('-', ' ')}
+                      {project.status.replace('_', ' ')}
                     </Badge>
                   </div>
-                  <div className="flex items-center space-x-2">
-                    <Progress value={project.progress} className="flex-1" />
-                    <span className="text-sm text-gray-500 w-12">{project.progress}%</span>
-                  </div>
-                  <div className="flex items-center text-xs text-gray-500">
-                    <Calendar className="h-3 w-3 mr-1" />
-                    Due: {project.deadline}
+                  
+                  <div className="mt-4 space-y-2">
+                    <div className="flex justify-between text-sm">
+                      <span>Progress</span>
+                      <span>{project.progress}%</span>
+                    </div>
+                    <Progress value={project.progress} className="h-2" />
+                    <div className="flex justify-between text-xs text-muted-foreground">
+                      <span>{project.completed_tasks} of {project.total_tasks} tasks</span>
+                      <span>Due: {formatDate(project.deadline)}</span>
+                    </div>
                   </div>
                 </div>
               ))}
             </div>
           </CardContent>
         </Card>
-
-        <Card>
+        
+        <Card className="col-span-3">
           <CardHeader>
-            <CardTitle>Team Workload</CardTitle>
-            <CardDescription>Current task distribution across team members</CardDescription>
+            <CardTitle>Team Members</CardTitle>
+            <CardDescription>Your team's task distribution</CardDescription>
           </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={teamWorkloadData} layout="horizontal">
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis type="number" domain={[0, 12]} />
-                <YAxis dataKey="member" type="category" width={60} />
-                <Tooltip />
-                <Bar dataKey="tasks" fill="#3B82F6" name="Current Tasks" />
-                <Bar dataKey="capacity" fill="#E5E7EB" name="Capacity" />
-              </BarChart>
-            </ResponsiveContainer>
+            <div className="space-y-4">
+              {projects[0]?.team_members?.map((member) => (
+                <div key={member.id} className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="font-medium">{member.name}</div>
+                    <div className="text-sm text-muted-foreground">
+                      {member.role}
+                    </div>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <div className="w-full bg-gray-200 rounded-full h-2.5">
+                      <div 
+                        className="bg-blue-600 h-2.5 rounded-full" 
+                        style={{ 
+                          width: `${(member.tasks_completed / (member.tasks_assigned || 1)) * 100}%` 
+                        }}
+                      />
+                    </div>
+                    <span className="text-xs text-muted-foreground">
+                      {member.tasks_completed}/{member.tasks_assigned}
+                    </span>
+                  </div>
+                </div>
+              ))}
+              
+              <div className="mt-6">
+                <h4 className="font-medium mb-2">Recent Tasks</h4>
+                <div className="space-y-3">
+                  {recent_tasks.slice(0, 5).map((task) => (
+                    <div key={task.id} className="flex items-start space-x-3">
+                      <div className={`w-2 h-2 mt-2 rounded-full ${
+                        task.status === 'completed' ? 'bg-green-500' : 
+                        task.status === 'in_progress' ? 'bg-blue-500' : 'bg-yellow-500'
+                      }`} />
+                      <div className="flex-1">
+                        <p className="text-sm font-medium">{task.title}</p>
+                        <div className="flex items-center text-xs text-muted-foreground">
+                          <span>{task.project?.title || 'No project'}</span>
+                          <span className="mx-2">•</span>
+                          <span>Due: {formatDate(task.due_date)}</span>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
           </CardContent>
         </Card>
       </div>
@@ -180,9 +282,9 @@ export function ManagerOverview() {
         </CardHeader>
         <CardContent>
           <ResponsiveContainer width="100%" height={300}>
-            <LineChart data={taskCompletionData}>
+            <LineChart data={recent_tasks}>
               <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="week" />
+              <XAxis dataKey="due_date" />
               <YAxis />
               <Tooltip />
               <Line type="monotone" dataKey="completed" stroke="#10B981" strokeWidth={2} name="Completed" />
@@ -193,7 +295,7 @@ export function ManagerOverview() {
       </Card>
 
       {/* Upcoming Deadlines and Quick Actions */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-2">
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center">
@@ -204,18 +306,20 @@ export function ManagerOverview() {
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              {upcomingDeadlines.map((item, index) => (
-                <div key={index} className="flex items-center justify-between p-3 rounded-lg bg-gray-50 hover:bg-gray-100 transition-colors">
+              {recent_tasks.slice(0, 5).map((task) => (
+                <div key={task.id} className="flex items-center justify-between p-3 rounded-lg bg-gray-50 hover:bg-gray-100 transition-colors">
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-900">{item.task}</p>
-                    <p className="text-sm text-gray-500">{item.project}</p>
+                    <p className="text-sm font-medium text-gray-900">{task.title}</p>
+                    <p className="text-sm text-gray-500">{task.project?.title || 'No project'}</p>
                     <div className="flex items-center mt-1">
                       <Calendar className="h-3 w-3 mr-1 text-gray-400" />
-                      <span className="text-xs text-gray-500">{item.deadline}</span>
+                      <span className="text-xs text-gray-500">
+                        {task.due_date ? `Due: ${formatDate(task.due_date)}` : 'No due date'}
+                      </span>
                     </div>
                   </div>
-                  <Badge className={getPriorityColor(item.priority)}>
-                    {item.priority}
+                  <Badge className={getStatusColor(task.status)}>
+                    {task.status.replace('_', ' ')}
                   </Badge>
                 </div>
               ))}

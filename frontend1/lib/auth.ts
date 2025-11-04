@@ -1,5 +1,5 @@
 // Authentication and role management
-export type UserRole = 'superadmin' | 'admin' | 'manager' | 'developer' | 'sales' | 'support' | 'verifier' | 'user' | 'project_manager' | 'salesperson';
+export type UserRole = 'superadmin' | 'admin' | 'developer' | 'project_manager' | 'verifier' | 'salesperson' | 'support' | 'user';
 
 // Token storage keys
 const ACCESS_TOKEN_KEY = 'access_token';
@@ -7,15 +7,24 @@ const REFRESH_TOKEN_KEY = 'refresh_token';
 
 // JWT token type
 export interface JwtPayload {
-  user_id: number;
-  email: string;
-  name?: string;
-  role: UserRole;
-  exp: number;
-  organization_role?: string;
-  organization_id?: string;
-  organization_name?: string;
-  // Add other JWT claims as needed
+  // Standard JWT claims
+  sub?: string;           // Subject (user ID)
+  email?: string;         // User's email
+  name?: string;          // User's full name
+  role?: UserRole;        // User's role (fallback)
+  exp: number;            // Expiration time
+  iat?: number;           // Issued at
+  
+  // Custom claims
+  user_id?: string | number;  // User ID (legacy)
+  organization_role?: string; // User's role in the organization
+  organization_id?: string;   // Organization ID
+  organization_name?: string; // Organization name
+  is_staff?: boolean;     // Is staff member
+  is_superuser?: boolean; // Is superuser
+  
+  // Allow any other string keys
+  [key: string]: any;
 }
 
 export interface User {
@@ -23,14 +32,18 @@ export interface User {
   name: string;
   email: string;
   role: UserRole;
-  organization_role?: string;
-  organization?: string | {
+  organization_role?: UserRole;  // User's role in the organization
+  organization?: {
     id: string;
     name: string;
-    // Add other organization fields as needed
   };
-  avatar?: string;
-  // Add other user fields as needed
+  // For backward compatibility, also include direct organization fields
+  organization_id?: string;
+  organization_name?: string;
+  avatar: string;
+  is_superuser?: boolean;
+  is_staff?: boolean;
+  permissions?: string[];
 }
 
 // Token management
@@ -152,27 +165,51 @@ export const getCurrentUser = (): User | null => {
   const payload = parseJwt(token);
   if (!payload) return null;
   
+  console.log('[AUTH] Decoded JWT payload:', payload);
+  
+  // Determine the user's role, prioritizing organization_role over role
+  const roleFromToken = (payload.organization_role || payload.role || 'user').toLowerCase();
+  const userRole = (['superadmin', 'admin', 'developer', 'project_manager', 'verifier', 'salesperson', 'support', 'user'].includes(roleFromToken) 
+    ? roleFromToken 
+    : 'user') as UserRole;
+  
   // Map JWT payload to User interface
   const user: User = {
-    id: payload.user_id,
-    name: payload.name || payload.email.split('@')[0], // Use name from token or default to email prefix
-    email: payload.email,
-    role: payload.role,
-    avatar: payload.email.charAt(0).toUpperCase(), // First letter of email as avatar
+    id: payload.user_id || payload.sub || `user-${Date.now()}`,
+    name: payload.name || payload.email?.split('@')[0] || 'User',
+    email: payload.email || '',
+    role: userRole,
+    avatar: payload.email?.charAt(0).toUpperCase() || 'U',
+    is_staff: payload.is_staff || false,
+    is_superuser: payload.is_superuser || false,
+    organization_role: userRole,
+    // Map organization fields
+    organization_id: payload.organization_id,
+    organization_name: payload.organization_name,
+    // Also include organization object for backward compatibility
+    organization: payload.organization_id ? {
+      id: payload.organization_id,
+      name: payload.organization_name || 'Organization'
+    } : undefined
   };
 
-  // Add organization role if available in the token
-  if (payload.organization_role) {
-    user.organization_role = payload.organization_role;
-  }
-
   // Add organization details if available in the token
-  if (payload.organization_id && payload.organization_name) {
+  if (payload.organization_id || payload.organization_name) {
     user.organization = {
-      id: payload.organization_id,
-      name: payload.organization_name
+      id: String(payload.organization_id || ''),
+      name: String(payload.organization_name || 'Unknown Organization')
     };
+    
+    // If we have an organization role in the token, use it
+    if (payload.organization_role) {
+      const orgRole = payload.organization_role.toLowerCase();
+      if (['superadmin', 'admin', 'developer', 'project_manager', 'verifier', 'salesperson', 'support', 'user'].includes(orgRole)) {
+        user.organization_role = orgRole as UserRole;
+      }
+    }
   }
+  
+  console.log('[AUTH] Processed user object:', user);
 
   return user;
 };
@@ -185,7 +222,10 @@ export const getMockUser = (): User => {
     email: 'admin@example.com',
     role: 'superadmin',
     avatar: 'A',
-    organization: 'Example Corp'
+    organization: {
+      id: '1',
+      name: 'Example Corp'
+    }
   };
 };
 
@@ -269,10 +309,8 @@ export const hasPermission = (userRole: UserRole, requiredRole: UserRole): boole
     superadmin: 9,
     admin: 8,
     project_manager: 7,
-    manager: 7, // Alias for project_manager
     developer: 6,
-    sales: 5,
-    salesperson: 5, // Alias for sales
+    salesperson: 5,
     support: 4,
     verifier: 3,
     user: 2
@@ -291,10 +329,8 @@ export const getRoleDisplayName = (role: UserRole): string => {
   const roleNames: Record<UserRole, string> = {
     superadmin: 'Super Admin',
     admin: 'Organization Admin',
-    manager: 'Project Manager',
     project_manager: 'Project Manager',
     developer: 'Developer',
-    sales: 'Salesperson',
     salesperson: 'Salesperson',
     support: 'Support Staff',
     verifier: 'Verifier',

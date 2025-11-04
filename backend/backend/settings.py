@@ -60,6 +60,7 @@ INSTALLED_APPS = [
     'apps.notifications',
     'apps.dashboard',
     'apps.activity_logs',
+    'rest_framework_simplejwt.token_blacklist',
 ]
 
 MIDDLEWARE = [
@@ -108,17 +109,41 @@ DATABASES = {
     }
 }
 
+# Authentication backends
+AUTHENTICATION_BACKENDS = [
+    'apps.users.backends.CustomAuthBackend',
+    'django.contrib.auth.backends.ModelBackend',  # Fallback to default backend
+]
+
 AUTH_PASSWORD_VALIDATORS = [
-    {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator',},
-    {'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator',},
-    {'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator',},
-    {'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator',},
+    {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},
+    {'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator'},
+    {'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator'},
+    {'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator'},
 ]
 
 LANGUAGE_CODE = 'en-us'
 TIME_ZONE = 'UTC'
 USE_I18N = True
 USE_TZ = True
+
+# Email Configuration
+# =================
+EMAIL_ENABLED = os.getenv('EMAIL_ENABLED', 'True') == 'True'
+SEND_WELCOME_EMAIL = os.getenv('SEND_WELCOME_EMAIL', 'True') == 'True'
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend' if EMAIL_ENABLED else 'django.core.mail.backends.console.EmailBackend'
+EMAIL_HOST = os.getenv('EMAIL_HOST', 'smtp.gmail.com')
+EMAIL_PORT = int(os.getenv('EMAIL_PORT', 587))
+EMAIL_USE_TLS = os.getenv('EMAIL_USE_TLS', 'True') == 'True'
+EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER', '')
+EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', '')
+DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'noreply@example.com')
+REPLY_TO_EMAIL = os.getenv('REPLY_TO_EMAIL', DEFAULT_FROM_EMAIL)
+SERVER_EMAIL = os.getenv('SERVER_EMAIL', DEFAULT_FROM_EMAIL)
+EMAIL_TIMEOUT = int(os.getenv('EMAIL_TIMEOUT', 10))
+
+# Frontend URL for email templates
+FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:3000')
 
 STATIC_URL = '/static/'
 STATIC_ROOT = os.path.join(BASE_DIR, 'static')

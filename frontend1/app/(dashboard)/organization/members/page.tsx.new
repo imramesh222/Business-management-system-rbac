@@ -1,0 +1,383 @@
+'use client';
+
+import { useState, useEffect, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
+import { format } from 'date-fns';
+import { Plus, UserPlus, Loader2, MoreHorizontal, AlertCircle, RefreshCw, Check } from 'lucide-react';
+import { ColumnDef } from '@tanstack/react-table';
+
+import { Button } from '@/components/ui/button';
+import { DataTable } from '@/components/ui/data-table';
+import { toast, useToast } from '@/hooks/use-toast';
+import { AddMemberForm } from '@/components/organization/AddMemberForm';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Badge } from '@/components/ui/badge';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+
+import { getCurrentUser } from '@/lib/auth';
+import { apiGet, apiPost, apiPut, apiDelete } from '@/services/apiService';
+
+// Types
+export type OrganizationRole = 'admin' | 'developer' | 'project_manager' | 'support' | 'verifier' | 'salesperson' | 'user';
+
+export interface Member {
+  id: string;
+  user: {
+    id: string;
+    username: string;
+    email: string;
+    first_name?: string;
+    last_name?: string;
+  };
+  organization: {
+    id: string;
+    name: string;
+  };
+  role: OrganizationRole;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+type StatusVariant = 'active' | 'inactive' | 'suspended';
+
+const statusVariants: Record<StatusVariant, { label: string; color: string }> = {
+  active: { label: 'Active', color: 'bg-green-100 text-green-800' },
+  inactive: { label: 'Inactive', color: 'bg-yellow-100 text-yellow-800' },
+  suspended: { label: 'Suspended', color: 'bg-red-100 text-red-800' },
+};
+
+const roleVariants: Record<OrganizationRole, string> = {
+  admin: 'bg-purple-100 text-purple-800',
+  developer: 'bg-blue-100 text-blue-800',
+  project_manager: 'bg-green-100 text-green-800',
+  support: 'bg-yellow-100 text-yellow-800',
+  verifier: 'bg-indigo-100 text-indigo-800',
+  salesperson: 'bg-teal-100 text-teal-800',
+  user: 'bg-gray-100 text-gray-800',
+};
+
+// RoleDropdown component to handle role updates with local state
+interface RoleDropdownProps {
+  member: Member;
+  onRoleUpdate: (memberId: string, newRole: OrganizationRole) => Promise<void>;
+}
+
+const RoleDropdown = ({ member, onRoleUpdate }: RoleDropdownProps) => {
+  const [isUpdating, setIsUpdating] = useState(false);
+
+  const handleRoleChange = async (newRole: OrganizationRole) => {
+    if (newRole === member.role || isUpdating) return;
+    
+    try {
+      setIsUpdating(true);
+      await onRoleUpdate(member.id, newRole);
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button 
+          variant="outline" 
+          size="sm" 
+          className="w-40 justify-between"
+          disabled={isUpdating}
+        >
+          {isUpdating ? (
+            <>
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              Updating...
+            </>
+          ) : (
+            <span className="capitalize">{member.role.replace('_', ' ')}</span>
+          )}
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-48">
+        {Object.entries(roleVariants).map(([role]) => (
+          <DropdownMenuItem
+            key={role}
+            onSelect={() => handleRoleChange(role as OrganizationRole)}
+            className="flex items-center justify-between"
+          >
+            <span className="capitalize">{role.replace('_', ' ')}</span>
+            {member.role === role && (
+              <Check className="h-4 w-4 text-primary" />
+            )}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+};
+
+const OrganizationMembersPage = () => {
+  const router = useRouter();
+  const { toast } = useToast();
+  const [members, setMembers] = useState<Member[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isAddMemberOpen, setIsAddMemberOpen] = useState(false);
+  const [organizationId, setOrganizationId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [mounted, setMounted] = useState(false);
+
+  // Fix hydration issues
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  // Find organization ID
+  const findOrganizationId = useCallback(async (): Promise<string> => {
+    try {
+      const user = await getCurrentUser();
+      if (user?.organization?.id) {
+        return user.organization.id;
+      }
+
+      const orgs = await apiGet('/org/organizations/');
+      if (orgs?.results?.length > 0) {
+        return orgs.results[0].id;
+      }
+
+      throw new Error('No organizations found');
+    } catch (error) {
+      console.error('Error finding organization:', error);
+      throw error;
+    }
+  }, []);
+
+  // Fetch members
+  const fetchMembers = useCallback(async () => {
+    if (!organizationId) return;
+    
+    try {
+      setIsLoading(true);
+      const data = await apiGet(`/org/organizations/${organizationId}/members/`);
+      setMembers(data.results || []);
+      setError(null);
+    } catch (error) {
+      console.error('Error fetching members:', error);
+      setError('Failed to load organization members');
+      toast({
+        title: 'Error',
+        description: 'Failed to load organization members',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  }, [organizationId, toast]);
+
+  // Initialize component
+  useEffect(() => {
+    const initialize = async () => {
+      try {
+        const orgId = await findOrganizationId();
+        setOrganizationId(orgId);
+      } catch (error) {
+        console.error('Initialization error:', error);
+        setError('Failed to initialize organization data');
+      }
+    };
+    
+    if (mounted) {
+      initialize();
+    }
+  }, [mounted, findOrganizationId]);
+
+  // Update member role
+  const updateMemberRole = async (memberId: string, newRole: OrganizationRole) => {
+    if (!organizationId) {
+      throw new Error('Organization ID is not available');
+    }
+    
+    try {
+      await apiPut(`/org/organizations/${organizationId}/members/${memberId}/`, {
+        role: newRole,
+      });
+      
+      setMembers(prevMembers => 
+        prevMembers.map(member => 
+          member.id === memberId ? { ...member, role: newRole } : member
+        )
+      );
+      
+      toast({
+        title: 'Success',
+        description: 'Member role updated successfully',
+      });
+    } catch (error: any) {
+      console.error('Error updating member role:', error);
+      const errorMessage = error.response?.data?.detail || 'Failed to update member role';
+      
+      toast({
+        title: 'Error',
+        description: errorMessage,
+        variant: 'destructive',
+      });
+      
+      throw error;
+    }
+  };
+
+  // Remove member
+  const handleRemoveMember = async (member: Member) => {
+    if (!organizationId) {
+      toast({
+        title: 'Error',
+        description: 'Organization ID is not available',
+        variant: 'destructive',
+      });
+      return;
+    }
+    
+    const displayName = member.user.first_name && member.user.last_name 
+      ? `${member.user.first_name} ${member.user.last_name}`
+      : member.user.username;
+
+    if (!confirm(`Are you sure you want to remove ${displayName} from the organization?`)) {
+      return;
+    }
+
+    try {
+      await apiDelete(`/org/organizations/${organizationId}/members/${member.id}/`);
+      
+      setMembers(prevMembers => prevMembers.filter(m => m.id !== member.id));
+      
+      toast({
+        title: 'Success',
+        description: `${displayName} has been removed from the organization`,
+      });
+    } catch (error: any) {
+      console.error('Error removing member:', error);
+      const errorMessage = error.response?.data?.detail || 'Failed to remove member';
+      
+      toast({
+        title: 'Error',
+        description: errorMessage,
+        variant: 'destructive',
+      });
+    }
+  };
+
+  // Columns definition
+  const columns: ColumnDef<Member>[] = [
+    {
+      accessorKey: 'user',
+      header: 'Name',
+      cell: ({ row }) => {
+        const member = row.original;
+        const name = member.user.first_name && member.user.last_name
+          ? `${member.user.first_name} ${member.user.last_name}`
+          : member.user.username;
+        
+        return (
+          <div className="font-medium">
+            {name}
+            <p className="text-sm text-muted-foreground">{member.user.email}</p>
+          </div>
+        );
+      },
+    },
+    {
+      accessorKey: 'role',
+      header: 'Role',
+      cell: ({ row }) => (
+        <RoleDropdown 
+          member={row.original} 
+          onRoleUpdate={updateMemberRole} 
+        />
+      ),
+    },
+    {
+      accessorKey: 'status',
+      header: 'Status',
+      cell: ({ row }) => {
+        const status = row.original.is_active ? 'active' : 'inactive';
+        return (
+          <Badge className={statusVariants[status].color}>
+            {statusVariants[status].label}
+          </Badge>
+        );
+      },
+    },
+    {
+      id: 'actions',
+      cell: ({ row }) => {
+        const member = row.original;
+        return (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" className="h-8 w-8 p-0">
+                <span className="sr-only">Open menu</span>
+                <MoreHorizontal className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem
+                onClick={() => handleRemoveMember(member)}
+                className="text-red-600"
+              >
+                Remove from organization
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        );
+      },
+    },
+  ];
+
+  if (!mounted) {
+    return null;
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-2xl font-bold tracking-tight">Team Members</h2>
+          <p className="text-muted-foreground">
+            Manage your organization members and their permissions
+          </p>
+        </div>
+        <Button onClick={() => setIsAddMemberOpen(true)}>
+          <UserPlus className="mr-2 h-4 w-4" />
+          Add Member
+        </Button>
+      </div>
+
+      {error && (
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
+
+      <div className="rounded-md border">
+        <DataTable
+          columns={columns}
+          data={members}
+          isLoading={isLoading}
+          emptyMessage="No members found"
+        />
+      </div>
+
+      <AddMemberForm
+        open={isAddMemberOpen}
+        onOpenChange={setIsAddMemberOpen}
+        onSuccess={fetchMembers}
+        organizationId={organizationId || ''}
+      />
+    </div>
+  );
+};
+
+export default OrganizationMembersPage;

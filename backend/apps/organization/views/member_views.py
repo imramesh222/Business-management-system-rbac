@@ -1,6 +1,8 @@
 import random
 import string
+import logging
 from django.shortcuts import get_object_or_404
+from django.http import Http404
 from django.db import transaction
 from django.db.models import Q, Count
 from rest_framework import status, viewsets, permissions, mixins, serializers
@@ -8,6 +10,17 @@ from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.contrib.auth import get_user_model
+from django.conf import settings
+
+# Try to import token blacklist models
+try:
+    from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken, OutstandingToken
+except ImportError:
+    BlacklistedToken = None
+    OutstandingToken = None
+
+# Set up logging
+logger = logging.getLogger(__name__)
 from django.core.mail import send_mail
 from django.template.loader import render_to_string
 from django.conf import settings
@@ -128,9 +141,9 @@ class OrganizationMemberViewSet(viewsets.ModelViewSet):
         except (ValueError, Organization.DoesNotExist):
             raise NotFound("Organization not found")
 
-    @action(detail=False, methods=['post'], url_path='invite', 
+    @action(detail=True, methods=['post'], url_path='invite', 
             permission_classes=[IsSuperAdmin | IsOrganizationAdmin])
-    def invite_member(self, request):
+    def invite_member(self, request, pk=None):
         """
         Invite a new member to the organization by email.
         Generates a random password and sends an invitation email.
@@ -142,8 +155,12 @@ class OrganizationMemberViewSet(viewsets.ModelViewSet):
         print(f"Request data: {request.data}")
         print(f"Request user: {request.user}")
         print(f"Authenticated: {request.user.is_authenticated}")
+        print(f"Organization ID from URL: {pk}")
         
         try:
+            # Get organization from URL parameter
+            organization = get_object_or_404(Organization, id=pk)
+            
             # Extract data from request
             data = request.data.dict() if hasattr(request.data, 'dict') else dict(request.data)
             print(f"\nParsed data: {data}")
@@ -153,6 +170,7 @@ class OrganizationMemberViewSet(viewsets.ModelViewSet):
             
             print(f"Email from request: {email}")
             print(f"Role from request: {role}")
+            print(f"Organization: {organization.name} (ID: {organization.id})")
             
             # Normalize role to snake_case
             if role:
@@ -239,38 +257,111 @@ class OrganizationMemberViewSet(viewsets.ModelViewSet):
         # Check if user already exists
         User = get_user_model()
         try:
-            user = User.objects.get(email=email)
-            print(f"User with email {email} already exists: {user.id}")
-            
-            # Check if already a member
-            existing_member = OrganizationMember.objects.filter(
-                user=user, 
-                organization=organization
-            ).first()
-            
-            if existing_member:
-                print(f"User is already a member of this organization")
-                return Response(
-                    {'error': 'User is already a member of this organization'}, 
-                    status=status.HTTP_400_BAD_REQUEST
-                )
+            user = User.objects.filter(email=email).first()
+            if user:
+                print(f"User with email {email} already exists: {user.id}")
+                # Check if user is already a member of this organization
+                if OrganizationMember.objects.filter(user=user, organization=organization).exists():
+                    return Response(
+                        {"error": "User is already a member of this organization"},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
                 
-            # User exists but not in this organization, add them
+                # Add existing user to organization
+                member = OrganizationMember.objects.create(
+                    user=user,
+                    organization=organization,
+                    role=role,
+                    is_active=True
+                )
+                print(f"Added existing user to organization: {member.id}")
+                
+                # Generate password reset token for existing users
+                from django.contrib.auth.tokens import default_token_generator
+                from django.utils.encoding import force_bytes
+                from django.utils.http import urlsafe_base64_encode
+                
+                # Generate token and UID for password reset
+                token = default_token_generator.make_token(user)
+                uid = urlsafe_base64_encode(force_bytes(user.pk))
+                reset_url = f"{settings.FRONTEND_URL}/reset-password/{uid}/{token}/"
+                
+                # Send organization invitation email with password reset link
+                try:
+                    subject = f'You\'ve been added to {organization.name} on ProjectK'
+                    message = render_to_string('emails/organization_invitation.html', {
+                        'user': user,
+                        'organization': organization,
+                        'role': role,
+                        'login_url': f'{settings.FRONTEND_URL}/login',
+                        'reset_url': reset_url,
+                    })
+                    
+                    send_mail(
+                        subject=subject,
+                        message=f"You've been added to {organization.name}. Please use this link to set your password: {reset_url}",
+                        from_email=settings.DEFAULT_FROM_EMAIL,
+                        recipient_list=[email],
+                        html_message=message,
+                        fail_silently=False,
+                    )
+                    print(f"Invitation email with password reset sent to {email}")
+                except Exception as e:
+                    print(f"Warning: Failed to send invitation email: {str(e)}")
+                    # Don't fail the whole process if email fails
+                    pass
+                
+                return Response(
+                    {"message": "User added to organization"},
+                    status=status.HTTP_201_CREATED
+                )
+            
+            # Generate a random password for new users
+            password = User.objects.make_random_password(length=12)
+            username = email.split('@')[0]
+            
+            # Create user with a flag to change password on first login
+            user = User.objects.create_user(
+                username=username,
+                email=email,
+                password=password,
+                is_active=True
+            )
+            
+            # Create user profile if it doesn't exist
+            from apps.users.models import UserProfile
+            profile, created = UserProfile.objects.get_or_create(user=user)
+            
+            # Generate OTP for the user
+            otp = profile.generate_otp()
+            
+            # Log the OTP for development (remove in production)
+            print(f"Generated OTP for {email}: {otp}")
+            print(f"Generated password for {email}: {password}")
+            
+            # Set password change required flag
+            profile.password_change_required = True
+            profile.save()
+            print(f"Successfully created user: {user.id} - {user.email}")
+            
+            # Add user to organization
             member = OrganizationMember.objects.create(
                 user=user,
                 organization=organization,
                 role=role,
                 is_active=True
             )
-            print(f"Added existing user to organization: {member.id}")
+            print(f"Successfully created organization member: {member.id}")
             
-            # Send notification email to existing user
+            # Send welcome email with credentials
             try:
-                subject = f'You have been added to {organization.name}'
-                message = render_to_string('emails/organization_invitation.html', {
+                subject = f'Welcome to {organization.name} on ProjectK'
+                message = render_to_string('emails/welcome_invitation.html', {
                     'user': user,
                     'organization': organization,
-                    'role': role,
+                    'email': email,
+                    'otp': otp,  # Include OTP in the email
+                    'password': password,  # Include the generated password
                     'login_url': f'{settings.FRONTEND_URL}/login',
                 })
                 
@@ -282,76 +373,25 @@ class OrganizationMemberViewSet(viewsets.ModelViewSet):
                     html_message=message,
                     fail_silently=False,
                 )
-                print(f"Organization invitation email sent to {email}")
+                print(f"Welcome email sent to {email}")
                 
             except Exception as email_error:
-                print(f"Warning: Failed to send invitation email: {str(email_error)}")
+                print(f"Warning: Failed to send welcome email: {str(email_error)}")
+                # Don't fail the whole process if email fails
+                pass
                 
-        except User.DoesNotExist:
-            print(f"Creating new user for email: {email}")
+            # Return success response
+            return Response(
+                {
+                    "message": "User invited successfully",
+                    "user_id": str(user.id),
+                    "email": email,
+                    "organization": organization.name,
+                    "role": role
+                },
+                status=status.HTTP_201_CREATED
+            )
             
-            # Generate a random username and password
-            username = email.split('@')[0] + '_' + ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
-            password = generate_random_password()
-            
-            try:
-                with transaction.atomic():
-                    # Create the user
-                    user = User.objects.create_user(
-                        username=username,
-                        email=email,
-                        password=password,
-                        is_active=True
-                    )
-                    print(f"Successfully created user: {user.id} - {user.email}")
-                    
-                    # Add user to organization
-                    member = OrganizationMember.objects.create(
-                        user=user,
-                        organization=organization,
-                        role=role,
-                        is_active=True
-                    )
-                    print(f"Successfully created organization member: {member.id}")
-                    
-                    # Send welcome email with credentials
-                    try:
-                        subject = f'Welcome to {organization.name} on ProjectK'
-                        message = render_to_string('emails/welcome_invitation.html', {
-                            'user': user,
-                            'organization': organization,
-                            'email': email,
-                            'password': password,
-                            'login_url': f'{settings.FRONTEND_URL}/login',
-                        })
-                        
-                        send_mail(
-                            subject=subject,
-                            message='',
-                            from_email=settings.DEFAULT_FROM_EMAIL,
-                            recipient_list=[email],
-                            html_message=message,
-                            fail_silently=False,
-                        )
-                        print(f"Welcome email sent to {email}")
-                        
-                    except Exception as email_error:
-                        print(f"Warning: Failed to send welcome email: {str(email_error)}")
-                        # Don't fail the whole process if email fails
-                        
-            except Exception as user_error:
-                print(f"Error creating user and member: {str(user_error)}")
-                import traceback
-                traceback.print_exc()
-                return Response(
-                    {
-                        'error': 'Failed to create user account and organization membership',
-                        'details': str(user_error),
-                        'type': type(user_error).__name__
-                    },
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-        
         except Exception as e:
             print(f"Unexpected error in user lookup/creation: {str(e)}")
             import traceback
@@ -375,20 +415,52 @@ class OrganizationMemberViewSet(viewsets.ModelViewSet):
             status=status.HTTP_201_CREATED
         )
         
+    def get_object(self):
+        """
+        Override to handle both 'pk' and 'member_id' URL parameters.
+        """
+        # Check if we're using the nested URL pattern with member_id
+        member_id = self.kwargs.get('member_id')
+        if member_id:
+            self.kwargs['pk'] = member_id
+            
+        # Get the organization_id from URL kwargs if present
+        organization_id = self.kwargs.get('organization_id')
+        if organization_id:
+            # Filter the queryset to only include members of this organization
+            queryset = self.get_queryset().filter(organization_id=organization_id)
+            
+            # Get the member by pk from the filtered queryset
+            try:
+                obj = queryset.get(pk=self.kwargs['pk'])
+                # Check object permissions
+                self.check_object_permissions(self.request, obj)
+                return obj
+            except OrganizationMember.DoesNotExist:
+                raise Http404("No OrganizationMember matches the given query.")
+        
+        # Fall back to default behavior if no organization_id in URL
+        return super().get_object()
+        
     def get_queryset(self):
+        """
+        Filter the queryset based on organization_id from URL kwargs if present.
+        """
         queryset = super().get_queryset()
         
-        # Filter by organization if specified in query params
-        organization_id = self.request.query_params.get('organization')
+        # Check for organization_id in URL kwargs (for nested routes)
+        organization_id = self.kwargs.get('organization_id')
         if organization_id:
+            logger.info(f"Filtering members by organization_id from URL: {organization_id}")
             queryset = queryset.filter(organization_id=organization_id)
+        
+        # Check for organization_id in query params (for backward compatibility)
+        organization_id_param = self.request.query_params.get('organization')
+        if organization_id_param and not organization_id:
+            logger.info(f"Filtering members by organization_id from query params: {organization_id_param}")
+            queryset = queryset.filter(organization_id=organization_id_param)
             
-        # Filter by role if specified
-        role = self.request.query_params.get('role')
-        if role:
-            queryset = queryset.filter(role=role)
-            
-        # Filter by search query
+        # Apply search if specified
         search = self.request.query_params.get('search')
         if search:
             queryset = queryset.filter(
@@ -399,13 +471,41 @@ class OrganizationMemberViewSet(viewsets.ModelViewSet):
                 Q(organization__name__icontains=search)
             )
             
-        return queryset
+        return queryset.distinct()
+
+    def get_organization(self):
+        """
+        Get the organization from the request.
+        This is used by the permission classes to check permissions.
+        """
+        if hasattr(self, 'organization'):
+            return self.organization
+            
+        organization_id = None
+        
+        # Try to get organization_id from URL kwargs
+        if 'organization_id' in self.kwargs:
+            organization_id = self.kwargs['organization_id']
+        elif 'pk' in self.kwargs and self.action == 'invite_member':
+            organization_id = self.kwargs['pk']
+        elif hasattr(self, 'request') and self.request.method == 'POST':
+            # For create operations, get organization_id from request data
+            organization_id = self.request.data.get('organization')
+            
+        if not organization_id:
+            return None
+            
+        try:
+            self.organization = Organization.objects.get(id=organization_id)
+            return self.organization
+        except (Organization.DoesNotExist, ValueError):
+            return None
 
     def get_permissions(self):
         """
         Instantiates and returns the list of permissions that this view requires.
         """
-        if self.action in ['create', 'update', 'partial_update', 'destroy']:
+        if self.action in ['create', 'update', 'partial_update', 'destroy', 'invite_member']:
             permission_classes = [IsSuperAdmin | IsOrganizationAdmin]
         else:
             permission_classes = [permissions.IsAuthenticated]
@@ -445,6 +545,44 @@ class OrganizationMemberViewSet(viewsets.ModelViewSet):
             })
             
         serializer.save(organization=organization)
+        
+    def update(self, request, *args, **kwargs):
+        try:
+            instance = self.get_object()
+            old_role = instance.role
+            # Only allow updating specific fields
+            data = {key: request.data.get(key) for key in ['role', 'is_active'] if key in request.data}
+            serializer = self.get_serializer(instance, data=data, partial=True)
+            serializer.is_valid(raise_exception=True)
+            self.perform_update(serializer)
+            
+            # Only try to invalidate tokens if role changed and token blacklist is available
+            if 'role' in request.data and request.data['role'] != old_role and OutstandingToken is not None:
+                from django.utils import timezone
+                
+                try:
+                    # Get all outstanding tokens for this user
+                    tokens = OutstandingToken.objects.filter(
+                        user_id=instance.user_id,
+                        expires_at__gt=timezone.now()
+                    )
+                    
+                    # Blacklist all tokens for this user
+                    for token in tokens:
+                        BlacklistedToken.objects.get_or_create(token=token)
+                        
+                    logger.info(f"Invalidated all tokens for user {instance.user.email} due to role change from {old_role} to {request.data['role']}")
+                except Exception as e:
+                    logger.warning(f"Could not invalidate tokens for user {instance.user.email}: {str(e)}")
+            
+            return Response(serializer.data)
+            
+        except Exception as e:
+            logger.error(f"Error updating organization member: {str(e)}")
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
     @action(detail=True, methods=['post'])
     def deactivate(self, request, pk=None):

@@ -1,3 +1,6 @@
+// Re-export all types for easier imports
+export * from './project-manager';
+
 // User roles type
 export type UserRole = 'superadmin' | 'user';
 

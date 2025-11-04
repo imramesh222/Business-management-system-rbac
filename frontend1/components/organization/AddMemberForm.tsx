@@ -40,9 +40,10 @@ type AddMemberFormProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSuccess: () => void;
+  organizationId?: string;
 };
 
-export function AddMemberForm({ open, onOpenChange, onSuccess }: AddMemberFormProps) {
+export function AddMemberForm({ open, onOpenChange, onSuccess, organizationId }: AddMemberFormProps) {
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
 
@@ -61,11 +62,16 @@ export function AddMemberForm({ open, onOpenChange, onSuccess }: AddMemberFormPr
       console.log('Inviting member with data:', values);
       console.log('Auth token:', localStorage.getItem('access_token'));
       
-      console.log('Sending request to:', `${API_URL}/org/organizations/invite/`);
+      if (!organizationId) {
+        throw new Error('Organization ID is required to invite a member');
+      }
+
+      const url = `${API_URL}/org/organizations/${organizationId}/invite/`;
+      console.log('Sending request to:', url);
       console.log('Request data:', values);
       
       const response = await apiPost(
-        `${API_URL}/org/organizations/invite/`, 
+        url, 
         values,
         {
           headers: {

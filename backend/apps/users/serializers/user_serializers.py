@@ -191,36 +191,41 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
                 'non_field_errors': ['This user has been deactivated.']
             })
         
-        # Generate tokens
+        # Generate tokens using the auth_serializer's get_token method
         print("Generating tokens...")
-        refresh = self.get_token(user)
+        from apps.users.serializers.auth_serializers import CustomTokenObtainPairSerializer as AuthSerializer
+        auth_serializer = AuthSerializer()
+        refresh = auth_serializer.get_token(user)
         
-        # Get the user's role if it exists
-        role = None
-        if getattr(user, 'is_superuser', False):
-            role = 'superadmin'
-            print(f"User {user.email} identified as superadmin")
-        elif hasattr(user, 'roles') and hasattr(user.roles, 'exists') and user.roles.exists():
-            role = user.roles.first().name
-            print(f"User {user.email} has role from roles: {role}")
-        elif hasattr(user, 'role'):
-            role = user.role
-            print(f"User {user.email} has direct role: {role}")
-        else:
-            print(f"Warning: No role found for user {user.email}")
+        # Get the role and organization info from the token
+        role = refresh.get('role', 'user')
+        organization_id = refresh.get('organization_id')
+        organization_name = refresh.get('organization_name')
+        organization_role = refresh.get('organization_role', role)
+        
+        print(f"Token generated with role: {role}, org_role: {organization_role}, org_id: {organization_id}")
         
         # Prepare the response data
         data = {
             'refresh': str(refresh),
             'access': str(refresh.access_token),
+            'role': organization_role,
+            'organization_role': organization_role,
+            'organization_id': organization_id,
+            'organization_name': organization_name,
+            'is_staff': refresh.get('is_staff', False),
+            'is_superuser': refresh.get('is_superuser', False),
             'user': {
                 'id': user.id,
                 'email': user.email,
-                'first_name': user.first_name,
-                'last_name': user.last_name,
-                'is_staff': user.is_staff,
-                'is_superuser': user.is_superuser,
-                'role': role,
+                'first_name': user.first_name or '',
+                'last_name': user.last_name or '',
+                'is_staff': refresh.get('is_staff', False),
+                'is_superuser': refresh.get('is_superuser', False),
+                'role': organization_role,
+                'organization_role': organization_role,
+                'organization_id': organization_id,
+                'organization_name': organization_name
             }
         }
         
@@ -286,14 +291,11 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
     
     @classmethod
     def get_token(cls, user):
-        """Generate the token with custom claims."""
-        token = super().get_token(user)
-        
-        # Add custom claims
-        token['email'] = user.email
-        token['is_superuser'] = user.is_superuser
-        token['is_staff'] = user.is_staff
-        # Ensure superusers always have the superadmin role in the token
-        token['role'] = 'superadmin' if user.is_superuser else getattr(user, 'role', None)
-        
-        return token
+        """
+        Generate the token with custom claims.
+        This is now a pass-through to the auth_serializer's get_token method
+        to ensure consistent token generation.
+        """
+        from apps.users.serializers.auth_serializers import CustomTokenObtainPairSerializer as AuthSerializer
+        auth_serializer = AuthSerializer()
+        return auth_serializer.get_token(user)

@@ -6,8 +6,12 @@ from django.utils import timezone
 from datetime import timedelta, datetime
 from django.db.models import Count, Sum, Q
 from django.db.models.functions import TruncDay, TruncMonth
-from apps.organization.models import Organization, OrganizationMember, OrganizationSubscription, PlanDuration
+from apps.organization.models import Organization, OrganizationMember, OrganizationSubscription, PlanDuration, OrganizationRoleChoices
 from apps.users.models import User
+from apps.projects.models import Project
+from apps.tasks.models import Task
+from apps.clients.models import Client
+from django.db.models import Prefetch, Count, Q
 
 class DashboardViewSet(viewsets.ViewSet):
     """
@@ -155,50 +159,195 @@ class DashboardViewSet(viewsets.ViewSet):
         })
 
 
+class ProjectManagerDashboardView(generics.RetrieveAPIView):
+    """
+    View for Project Manager dashboard.
+    Returns projects and tasks assigned to the project manager.
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request, *args, **kwargs):
+        """
+        Return project manager dashboard data.
+        """
+        try:
+            # Get the project manager's organization member record
+            project_manager = request.user.organization_members.filter(
+                role=OrganizationRoleChoices.PROJECT_MANAGER
+            ).first()
+            
+            if not project_manager:
+                return Response(
+                    {"error": "User is not a project manager"}, 
+                    status=status.HTTP_403_FORBIDDEN
+                )
+            
+            organization = project_manager.organization
+            
+            # Get managed projects with related data
+            managed_projects = Project.objects.filter(
+                organization=organization,
+                project_manager=project_manager
+            ).select_related('client').prefetch_related(
+                Prefetch('tasks', queryset=Task.objects.select_related('assigned_to__user'))
+            ).order_by('-created_at')
+            
+            # Get team members (developers, designers, etc.) in the organization
+            team_members = organization.members.filter(
+                role__in=[
+                    OrganizationRoleChoices.DEVELOPER,
+                    OrganizationRoleChoices.DESIGNER,
+                    OrganizationRoleChoices.QA
+                ]
+            ).select_related('user')
+            
+            # Get tasks assigned to team members
+            team_tasks = Task.objects.filter(
+                project__in=managed_projects,
+                assigned_to__in=team_members
+            ).select_related('project', 'assigned_to__user')
+            
+            # Prepare response data
+            projects_data = []
+            for project in managed_projects:
+                project_tasks = [t for t in team_tasks if t.project_id == project.id]
+                
+                projects_data.append({
+                    'id': str(project.id),
+                    'title': project.title,
+                    'status': project.status,
+                    'client': {
+                        'id': str(project.client.id),
+                        'name': project.client.name
+                    },
+                    'progress': project.progress,
+                    'deadline': project.deadline,
+                    'total_tasks': project.total_tasks,
+                    'completed_tasks': project.completed_tasks,
+                    'team_members': [
+                        {
+                            'id': str(member.id),
+                            'name': member.user.get_full_name() or member.user.email,
+                            'role': member.get_role_display(),
+                            'tasks_assigned': len([t for t in project_tasks if t.assigned_to_id == member.id]),
+                            'tasks_completed': len([t for t in project_tasks 
+                                                 if t.assigned_to_id == member.id and t.status == 'completed'])
+                        }
+                        for member in team_members
+                    ]
+                })
+            
+            # Get recent tasks for the project manager
+            recent_tasks = Task.objects.filter(
+                project__in=managed_projects
+            ).order_by('-created_at')[:10]
+            
+            return Response({
+                'projects': projects_data,
+                'recent_tasks': [
+                    {
+                        'id': str(task.id),
+                        'title': task.title,
+                        'status': task.status,
+                        'priority': task.priority,
+                        'due_date': task.due_date,
+                        'project': {
+                            'id': str(task.project.id),
+                            'title': task.project.title
+                        },
+                        'assigned_to': {
+                            'id': str(task.assigned_to.id) if task.assigned_to else None,
+                            'name': task.assigned_to.user.get_full_name() if task.assigned_to else 'Unassigned'
+                        } if task.assigned_to else None
+                    }
+                    for task in recent_tasks
+                ],
+                'stats': {
+                    'total_projects': len(projects_data),
+                    'active_projects': len([p for p in projects_data if p['status'] == 'in_progress']),
+                    'total_team_members': team_members.count(),
+                    'pending_tasks': team_tasks.filter(status='pending').count(),
+                    'in_progress_tasks': team_tasks.filter(status='in_progress').count(),
+                    'completed_tasks': team_tasks.filter(status='completed').count(),
+                }
+            })
+            
+        except Exception as e:
+            return Response(
+                {"error": str(e)}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
 class OrganizationAdminDashboardView(generics.RetrieveAPIView):
     """
     View for organization admin dashboard.
     Returns organization-specific metrics and data for admin users.
     """
     permission_classes = [IsAuthenticated, IsAdminUser]
-
+    
     def get(self, request, *args, **kwargs):
         """
         Return organization admin dashboard data.
         """
-        # Example organization admin metrics - replace with actual data from your models
-        data = {
-            'organization': {
-                'id': 1,
-                'name': 'Example Organization',
-                'members_count': 0,
-                'projects_count': 0,
-                'active_projects_count': 0,
-                'storage_usage': 0,
-                'storage_limit': 0,
-                'subscription_plan': 'Free',
-                'subscription_status': 'active',
-                'billing_status': 'paid',
-                'recent_activities': [],
-                'upcoming_events': [],
-                'team_performance': {
-                    'completed_tasks': 0,
-                    'pending_tasks': 0,
-                    'completion_rate': 0,
+        # Get the organization of the current user
+        try:
+            org_member = request.user.organization_members.first()
+            if not org_member:
+                return Response(
+                    {"error": "User is not a member of any organization"}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            organization = org_member.organization
+            
+            # Get organization stats
+            total_members = organization.members.count()
+            active_members = organization.members.filter(
+                user__is_active=True,
+                user__last_login__gte=timezone.now() - timedelta(days=30)
+            ).count()
+            
+            # Get project stats
+            projects = organization.projects.all()
+            total_projects = projects.count()
+            active_projects = projects.filter(status='in_progress').count()
+            
+            # Get recent activities (last 10)
+            recent_activities = organization.activities.order_by('-created_at')[:10]
+            
+            return Response({
+                'organization': {
+                    'id': str(organization.id),
+                    'name': organization.name,
+                    'status': organization.status,
+                    'total_members': total_members,
+                    'active_members': active_members,
+                    'total_projects': total_projects,
+                    'active_projects': active_projects,
+                    'created_at': organization.created_at,
+                    'subscription': {
+                        'plan': organization.current_subscription.plan_duration.plan.name if hasattr(organization, 'current_subscription') else None,
+                        'status': organization.current_subscription.status if hasattr(organization, 'current_subscription') else None,
+                        'end_date': organization.current_subscription.end_date if hasattr(organization, 'current_subscription') else None,
+                    } if hasattr(organization, 'current_subscription') else None
                 },
-                'resource_usage': {
-                    'storage': 0,
-                    'bandwidth': 0,
-                    'api_calls': 0,
-                },
-                'billing': {
-                    'current_plan': 'Free',
-                    'next_billing_date': None,
-                    'amount_due': 0,
-                    'payment_method': 'None',
-                }
-            },
-            'timestamp': timezone.now().isoformat()
-        }
-        
-        return Response(data)
+                'recent_activities': [
+                    {
+                        'id': str(activity.id),
+                        'action': activity.action,
+                        'details': activity.details,
+                        'created_at': activity.created_at,
+                        'user': {
+                            'id': str(activity.user.id),
+                            'name': activity.user.get_full_name() or activity.user.email,
+                        }
+                    } for activity in recent_activities
+                ]
+            })
+            
+        except Exception as e:
+            return Response(
+                {"error": str(e)}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )

@@ -1,9 +1,9 @@
 'use client';
 
-import { ReactNode, useEffect } from 'react';
+import { ReactNode, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { getCurrentUser, isAuthenticated } from '@/lib/auth';
-import { Sidebar } from '../../components/sidebar';
+import { Sidebar } from '@/components/sidebar';
 
 export default function OrganizationLayout({
   children,
@@ -11,17 +11,30 @@ export default function OrganizationLayout({
   children: ReactNode;
 }) {
   const router = useRouter();
-  const user = getCurrentUser();
+  const [isClient, setIsClient] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   
-  // Handle unauthenticated access
+  // Get user on client-side only
+  const [user, setUser] = useState<any>(null);
+  
   useEffect(() => {
+    // This effect runs only on the client
+    setIsClient(true);
+    
+    // Check authentication
     if (!isAuthenticated()) {
       router.push('/login');
+      return;
     }
+    
+    // Get user data
+    const currentUser = getCurrentUser();
+    setUser(currentUser);
+    setIsLoading(false);
   }, [router]);
 
   // Show loading state while checking authentication
-  if (!user) {
+  if (!isClient || isLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
@@ -31,15 +44,15 @@ export default function OrganizationLayout({
 
   // Get organization name safely
   const getOrganizationName = () => {
-    if (!user.organization) return 'Organization';
+    if (!user?.organization) return 'Organization';
     if (typeof user.organization === 'string') return user.organization;
     return (user.organization as any)?.name || 'Organization';
   };
 
   return (
     <div className="flex h-screen overflow-hidden">
-      {/* Sidebar */}
-      <Sidebar user={user} />
+      {/* Sidebar - Only render when we have user data */}
+      {user && <Sidebar user={user} />}
 
       {/* Main Content */}
       <div className="flex-1 overflow-auto">

@@ -10,23 +10,83 @@ export default function UserDashboard() {
   const user = getCurrentUser();
 
   useEffect(() => {
-    // Redirect to login if not authenticated
+    console.log('=== DASHBOARD DEBUG - INITIAL RENDER ===');
+    console.log('User object from getCurrentUser():', user);
+    console.log('Is authenticated:', isAuthenticated());
+    console.log('Current path:', window.location.pathname);
+    
+    // Check authentication
     if (!isAuthenticated()) {
+      console.log('User not authenticated, redirecting to login');
       router.push('/login');
       return;
     }
 
-    // If user exists but has an organization role, redirect to appropriate dashboard
     if (user) {
-      // Use organization_role if available, otherwise fall back to basic role
-      const userRole = user.organization_role || user.role;
+      // Debug JWT token
+      const token = localStorage.getItem('access_token');
+      console.log('JWT Token:', token);
       
-      // Only redirect if the current path doesn't match the user's role
+      if (token) {
+        try {
+          const payload = JSON.parse(atob(token.split('.')[1]));
+          console.log('JWT Payload:', payload);
+          console.log('JWT Role:', payload.role);
+          console.log('JWT Organization Role:', payload.organization_role);
+          console.log('JWT Organization ID:', payload.organization_id);
+          console.log('JWT Organization Name:', payload.organization_name);
+        } catch (e) {
+          console.error('Error parsing JWT:', e);
+        }
+      }
+      
+      // Determine user role with fallbacks
+      const userRole = (user.organization_role || user.role || 'user').toLowerCase();
+      console.log('=== ROLE DEBUG ===');
+      console.log('User role (computed):', userRole);
+      console.log('User object keys:', Object.keys(user));
+      console.log('User object values:', {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        organization_role: user.organization_role,
+        organization: user.organization
+      });
+      
+      // Define role-specific paths for all roles
+      const rolePaths: Record<string, string> = {
+        'superadmin': '/organization/superadmin/dashboard',
+        'admin': '/organization/admin/dashboard',
+        'project_manager': '/organization/project/dashboard',
+        'developer': '/organization/developer/dashboard',
+        'verifier': '/organization/verifier/dashboard',
+        'salesperson': '/organization/sales/dashboard',
+        'support': '/organization/support/dashboard',
+        'user': '/organization/user/dashboard'
+      };
+      
+      // Get the target path for the user's role, default to user dashboard
+      const rolePath = rolePaths[userRole] || '/organization/user/dashboard';
       const currentPath = window.location.pathname;
-      const rolePath = `/organization/${userRole}/dashboard`;
       
-      if (userRole !== 'user' && !currentPath.includes(rolePath)) {
-        router.push(rolePath);
+      console.log('Current path:', currentPath);
+      console.log('Computed role path:', rolePath);
+      
+      // Check if we're already on a valid path for this role
+      const rolePathVariations = [
+        rolePath,
+        rolePath.replace('/dashboard', ''), // Handle paths with or without /dashboard
+        `/${userRole}/dashboard` // Handle legacy paths
+      ];
+      
+      const isOnValidPath = rolePathVariations.some(path => currentPath.endsWith(path));
+      
+      // Only redirect if we're not already on a valid path for this role
+      if (!isOnValidPath) {
+        console.log(`Redirecting to role-specific dashboard: ${rolePath}`);
+        // Use replace to avoid adding to browser history
+        window.location.replace(rolePath);
       }
     }
   }, [router, user]);

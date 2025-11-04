@@ -6,6 +6,7 @@ from .views import (
     OrganizationViewSet,
     DashboardViewSet,
     OrganizationAdminDashboardView,
+    ProjectManagerDashboardView,
     debug_organization_view
 )
 from .views.member_views import OrganizationMemberViewSet, user_organization_memberships
@@ -39,18 +40,46 @@ urlpatterns = [
     # Include router URLs - this will create the standard REST endpoints
     path('', include(router.urls)),
     
+    # Nested organization members endpoint
+    path('organizations/<uuid:organization_id>/members/', 
+         OrganizationMemberViewSet.as_view({'get': 'list', 'post': 'create'}), 
+         name='organization-members-list'),
+    
+    # Invite member endpoint (nested under organization)
+    path('organizations/<uuid:pk>/invite/', 
+         OrganizationMemberViewSet.as_view({'post': 'invite_member'}),
+         name='organization-invite-member'),
+    path('organizations/<uuid:organization_id>/members/<uuid:pk>/', 
+         OrganizationMemberViewSet.as_view({
+             'get': 'retrieve',
+             'put': 'update',
+             'patch': 'partial_update',
+             'delete': 'destroy'
+         }), 
+         name='organization-members-detail'),
+    
     # User memberships endpoint
     path('users/<uuid:user_id>/organization-memberships/', 
          user_organization_memberships, 
          name='user-organization-memberships'),
+         
+    # Catch-all for organization members to handle different URL patterns
+    path('organizations/<uuid:organization_id>/members/<uuid:member_id>/', 
+         OrganizationMemberViewSet.as_view({
+             'get': 'retrieve',
+             'put': 'update',
+             'patch': 'partial_update',
+             'delete': 'destroy'
+         }), 
+         name='organization-members-detail-alt'),
     
     # Organization registration
     path('register/', OrganizationRegistrationView.as_view(), name='organization-register'),
     
-    # Member management - specific actions
-    path('organizations/invite/', 
-         OrganizationMemberViewSet.as_view({'post': 'invite_member'}), 
-         name='invite-member'),
+    # Project Manager Dashboard
+    path('dashboard/project-manager/', 
+         ProjectManagerDashboardView.as_view(), 
+         name='project-manager-dashboard'),
     
     # Member count endpoint
     path('organizations/<uuid:pk>/member-count/', 

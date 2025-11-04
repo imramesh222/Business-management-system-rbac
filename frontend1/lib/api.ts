@@ -24,6 +24,16 @@ export function getDefaultHeaders(): HeadersInit {
  * Helper function to handle API responses
  */
 export async function handleApiResponse<T>(response: Response): Promise<T> {
+  if (response.status === 401) {
+    // Clear auth data and redirect to login on 401
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('access_token');
+      localStorage.removeItem('refresh_token');
+      window.location.href = '/login?session_expired=1';
+    }
+    throw new Error('Your session has expired. Please log in again.');
+  }
+
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
     throw new Error(

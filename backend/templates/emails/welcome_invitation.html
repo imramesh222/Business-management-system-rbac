@@ -35,9 +35,37 @@
         }
         .credentials {
             background-color: #f3f4f6;
-            padding: 15px;
+            padding: 20px;
             border-radius: 5px;
+            margin: 20px 0;
+            text-align: center;
+        }
+        .otp-code {
+            font-size: 28px;
+            font-weight: bold;
+            letter-spacing: 3px;
+            color: #4f46e5;
             margin: 15px 0;
+            padding: 10px 20px;
+            background-color: #f0f0f0;
+            border-radius: 5px;
+            display: inline-block;
+        }
+        .note {
+            background-color: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 12px;
+            margin: 16px 0;
+            border-radius: 4px;
+            color: #856404;
+        }
+        .warning {
+            background-color: #f8d7da;
+            border-left: 4px solid #dc3545;
+            padding: 12px;
+            margin: 16px 0;
+            border-radius: 4px;
+            color: #721c24;
         }
     </style>
 </head>
@@ -47,20 +75,34 @@
     </div>
     <div class="content">
         <p>Hello,</p>
-        <p>You've been invited to join <strong>{{ organization.name }}</strong> on ProjectK. Here are your login credentials:</p>
+        <p>You've been invited to join <strong>{{ organization.name }}</strong> on ProjectK. Here are your login details:</p>
         
         <div class="credentials">
             <p><strong>Email:</strong> {{ email }}</p>
-            <p><strong>Password:</strong> {{ password }}</p>
+            <p>Your One-Time Password (OTP) for first login:</p>
+            <div class="otp-code">{{ otp }}</div>
+            <p>This OTP is valid for 24 hours.</p>
         </div>
         
-        <p>For security reasons, we recommend changing your password after your first login.</p>
+        <div class="note">
+            <p><strong>Note:</strong> For security reasons, you will be required to change your password after your first login.</p>
+        </div>
         
-        <a href="{{ login_url }}" class="button">Login to Your Account</a>
+        <div class="warning">
+            <p><strong>Important:</strong> Do not share this OTP with anyone. ProjectK will never ask for your OTP via email, phone, or any other means.</p>
+        </div>
         
-        <p>If you have any questions, please contact your organization administrator.</p>
+        <div style="text-align: center; margin: 25px 0;">
+            <a href="{{ login_url }}" class="button">Login to Your Account</a>
+        </div>
+        
+        <p>If you did not request this invitation, please ignore this email or contact support immediately.</p>
         
         <p>Best regards,<br>The ProjectK Team</p>
+        
+        <p style="font-size: 12px; color: #6b7280; margin-top: 30px; border-top: 1px solid #e5e7eb; padding-top: 15px;">
+            This is an automated message, please do not reply to this email.
+        </p>
     </div>
 </body>
 </html>

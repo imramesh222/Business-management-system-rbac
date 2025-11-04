@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { format } from 'date-fns';
-import { Plus, UserPlus, Loader2, MoreHorizontal, AlertCircle, RefreshCw } from 'lucide-react';
+import { Plus, UserPlus, Loader2, MoreHorizontal, AlertCircle, RefreshCw, Check } from 'lucide-react';
 import { ColumnDef } from '@tanstack/react-table';
 
 import { Button } from '@/components/ui/button';
@@ -14,7 +14,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Badge } from '@/components/ui/badge';
@@ -26,7 +25,7 @@ import { apiGet, apiPost, apiPut, apiDelete } from '@/services/apiService';
 // Types
 export type OrganizationRole = 'admin' | 'developer' | 'project_manager' | 'support' | 'verifier' | 'salesperson' | 'user';
 
-export type Member = {
+export interface Member {
   id: string;
   user: {
     id: string;
@@ -43,7 +42,7 @@ export type Member = {
   is_active: boolean;
   created_at: string;
   updated_at: string;
-};
+}
 
 type StatusVariant = 'active' | 'inactive' | 'suspended';
 
@@ -78,7 +77,64 @@ const getRoleInfo = (role: OrganizationRole) => {
   return roleMap[role] || { name: role, color: 'bg-gray-100 text-gray-800' };
 };
 
-export default function OrganizationMembersPage() {
+// RoleDropdown component to handle role updates with local state
+interface RoleDropdownProps {
+  member: Member;
+  onRoleUpdate: (memberId: string, newRole: OrganizationRole) => Promise<void>;
+}
+
+const RoleDropdown = ({ member, onRoleUpdate }: RoleDropdownProps) => {
+  const [isUpdating, setIsUpdating] = useState(false);
+
+  const handleRoleChange = async (newRole: OrganizationRole) => {
+    if (newRole === member.role || isUpdating) return;
+    
+    try {
+      setIsUpdating(true);
+      await onRoleUpdate(member.id, newRole);
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button 
+          variant="outline" 
+          size="sm" 
+          className="w-40 justify-between"
+          disabled={isUpdating}
+        >
+          {isUpdating ? (
+            <>
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              Updating...
+            </>
+          ) : (
+            <span className="capitalize">{member.role.replace('_', ' ')}</span>
+          )}
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-48">
+        {Object.entries(roleVariants).map(([role]) => (
+          <DropdownMenuItem
+            key={role}
+            onSelect={() => handleRoleChange(role as OrganizationRole)}
+            className="flex items-center justify-between"
+          >
+            <span className="capitalize">{role.replace('_', ' ')}</span>
+            {member.role === role && (
+              <Check className="h-4 w-4 text-primary" />
+            )}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+};
+
+const OrganizationMembersPage = () => {
   const router = useRouter();
   const { toast } = useToast();
   const [members, setMembers] = useState<Member[]>([]);
@@ -86,89 +142,79 @@ export default function OrganizationMembersPage() {
   const [isAddMemberOpen, setIsAddMemberOpen] = useState(false);
   const [organizationId, setOrganizationId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [debugInfo, setDebugInfo] = useState<any>(null);
   const [mounted, setMounted] = useState(false);
+  const [debugInfo, setDebugInfo] = useState<any>(null);
 
   // Fix hydration issues
   useEffect(() => {
     setMounted(true);
   }, []);
 
-  // Try multiple endpoints to find organization information
-  const findOrganizationId = async (): Promise<string> => {
-    // console.log('[ORG_MEMBERS] Attempting to find organization ID...');
+  // Find organization ID
+  const findOrganizationId = useCallback(async (): Promise<string> => {
+    try {
+      const user = await getCurrentUser();
+      if (user?.organization) {
+        // Handle case where organization might be a string or an object
+        const orgId = typeof user.organization === 'string' 
+          ? user.organization 
+          : user.organization.id;
+        
+        if (orgId) {
+          return orgId;
+        }
+      }
+
+      const orgs = await apiGet('/org/organizations/');
+      if (orgs?.results?.length > 0) {
+        const firstOrg = orgs.results[0];
+        return typeof firstOrg === 'string' ? firstOrg : firstOrg.id;
+      }
+
+      throw new Error('No organizations found');
+    } catch (error) {
+      console.error('Error finding organization:', error);
+      throw error;
+    }
+  }, []);
+
+  // Update member role
+  const updateMemberRole = useCallback(async (memberId: string, newRole: OrganizationRole) => {
+    if (!organizationId) {
+      throw new Error('Organization ID is not available');
+    }
     
-    // Strategy 1: Try user profile endpoint
     try {
-      const userResponse = await apiGet('/users/me/');
-      const userData = userResponse?.data || userResponse;
-      // console.log('[ORG_MEMBERS] User data received:', userData);
+      await apiPut(`/org/organizations/${organizationId}/members/${memberId}/`, {
+        role: newRole,
+      });
       
-      // Check various possible locations for organization ID
-      const orgPaths = [
-        userData?.organization_id,
-        userData?.organization?.id,
-        userData?.current_organization?.id,
-        userData?.profile?.organization_id,
-        userData?.memberships?.[0]?.organization?.id,
-      ];
+      // Update local state
+      setMembers(prevMembers => 
+        prevMembers.map(member => 
+          member.id === memberId ? { ...member, role: newRole } : member
+        )
+      );
       
-      for (const orgId of orgPaths) {
-        if (orgId && typeof orgId === 'string') {
-          // console.log('[ORG_MEMBERS] Found organization ID:', orgId);
-          return orgId;
-        }
-      }
-    } catch (error) {
-      // console.warn('[ORG_MEMBERS] Failed to get organization from user data:', error);
+      toast({
+        title: 'Success',
+        description: 'Member role updated successfully',
+      });
+    } catch (error: any) {
+      console.error('Error updating member role:', error);
+      const errorMessage = error.response?.data?.detail || 'Failed to update member role';
+      
+      toast({
+        title: 'Error',
+        description: errorMessage,
+        variant: 'destructive',
+      });
+      
+      throw error;
     }
+  }, [organizationId, toast]);
 
-    // Strategy 2: Try organizations list endpoint
-    try {
-      // console.log('[ORG_MEMBERS] Trying organizations list endpoint...');
-      const orgsResponse = await apiGet('/org/organizations/');
-      const orgsData = orgsResponse?.data || orgsResponse;
-      
-      if (Array.isArray(orgsData) && orgsData.length > 0) {
-        const orgId = orgsData[0].id;
-        // console.log('[ORG_MEMBERS] Found organization from list:', orgId);
-        return orgId;
-      } else if (orgsData?.results && Array.isArray(orgsData.results) && orgsData.results.length > 0) {
-        const orgId = orgsData.results[0].id;
-        // console.log('[ORG_MEMBERS] Found organization from paginated list:', orgId);
-        return orgId;
-      }
-    } catch (error) {
-      // console.warn('[ORG_MEMBERS] Failed to get organizations list:', error);
-    }
-
-    // Strategy 3: Try memberships endpoint
-    try {
-      // console.log('[ORG_MEMBERS] Trying memberships endpoint...');
-      const membershipsResponse = await apiGet('/org/memberships/');
-      const membershipsData = membershipsResponse?.data || membershipsResponse;
-      
-      if (Array.isArray(membershipsData) && membershipsData.length > 0) {
-        const orgId = membershipsData[0]?.organization?.id;
-        if (orgId) {
-          // console.log('[ORG_MEMBERS] Found organization from memberships:', orgId);
-          return orgId;
-        }
-      } else if (membershipsData?.results && Array.isArray(membershipsData.results) && membershipsData.results.length > 0) {
-        const orgId = membershipsData.results[0]?.organization?.id;
-        if (orgId) {
-          // console.log('[ORG_MEMBERS] Found organization from paginated memberships:', orgId);
-          return orgId;
-        }
-      }
-    } catch (error) {
-      // console.warn('[ORG_MEMBERS] Failed to get memberships:', error);
-    }
-
-    throw new Error('No organization found. Please ensure your account is associated with an organization or contact support.');
-  };
-
-  // Enhanced fetch members using correct backend endpoints
+  // Fetch members
   const fetchMembers = useCallback(async () => {
     if (!organizationId) return;
     
@@ -176,16 +222,9 @@ export default function OrganizationMembersPage() {
       setIsLoading(true);
       setError(null);
       
-      // console.log(`[ORG_MEMBERS] Fetching members for organization: ${organizationId}`);
-      
-      // Use the organization members endpoint with the organization ID in the URL
       const endpoint = `/org/organizations/${organizationId}/members/`;
-      // console.log(`[ORG_MEMBERS] Using endpoint: ${endpoint}`);
-      
       const membersResponse = await apiGet(endpoint);
       const data = membersResponse?.data || membersResponse;
-      
-      // console.log(`[ORG_MEMBERS] API Response from ${endpoint}:`, data);
       
       if (!data) {
         throw new Error('No data received from API');
@@ -196,33 +235,27 @@ export default function OrganizationMembersPage() {
       
       if (Array.isArray(data)) {
         membersArray = data;
-        // console.log('[ORG_MEMBERS] Data is array, using directly');
       } else if (data.results && Array.isArray(data.results)) {
         membersArray = data.results;
-        // console.log('[ORG_MEMBERS] Data is paginated, using results array');
       } else {
-        // console.warn('[ORG_MEMBERS] Unexpected API response structure:', data);
         throw new Error('Unexpected API response structure');
       }
       
-      // console.log(`[ORG_MEMBERS] Found ${membersArray.length} members`);
       setMembers(membersArray);
       
       // Update debug info
-      setDebugInfo((prev: any) => ({
-        ...prev,
+      setDebugInfo({
         membersResponse: data,
         membersCount: membersArray.length,
         endpointUsed: endpoint
-      }));
+      });
       
     } catch (error) {
-      // console.error('[ORG_MEMBERS] Error fetching members:', error);
+      console.error('[ORG_MEMBERS] Error fetching members:', error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
       setError('Failed to load organization members. Please try again or contact support.');
       setMembers([]);
       
-      // Show error toast
       toast({
         title: 'Error',
         description: 'Failed to load organization members. Please check your organization settings.',
@@ -233,7 +266,7 @@ export default function OrganizationMembersPage() {
     }
   }, [organizationId, toast]);
 
-  // Initialize and find organization
+  // Initialize component
   useEffect(() => {
     if (!mounted) return;
     
@@ -242,7 +275,7 @@ export default function OrganizationMembersPage() {
         const orgId = await findOrganizationId();
         setOrganizationId(orgId);
       } catch (error) {
-        console.error('[ORG_MEMBERS] Error finding organization:', error);
+        console.error('Initialization error:', error);
         const errorMessage = error instanceof Error ? error.message : 'Failed to find organization';
         setError(errorMessage);
         setIsLoading(false);
@@ -256,35 +289,32 @@ export default function OrganizationMembersPage() {
     };
     
     initialize();
-  }, [mounted, toast]);
+  }, [mounted, findOrganizationId, toast]);
 
-  // Fetch members when organization ID is available
+  // Fetch members when organization ID changes
   useEffect(() => {
     if (organizationId && mounted) {
       fetchMembers();
     }
   }, [organizationId, fetchMembers, mounted]);
 
+  // Handle member added
   const handleMemberAdded = async () => {
-    // console.log('[ORG_MEMBERS] Member added, refreshing list...');
     await fetchMembers();
   };
 
+  // Handle edit member
   const handleEditMember = async (member: Member) => {
     try {
-      // console.log('[ORG_MEMBERS] Editing member:', member.id);
-      
       if (!organizationId) {
         throw new Error('Organization ID not available');
       }
       
-      // Use the correct backend endpoint structure
       const response = await apiPut(`/org/organizations/${organizationId}/members/${member.user.id}/`, {
         role: member.role,
         is_active: member.is_active
       });
       
-      // console.log('[ORG_MEMBERS] Member updated:', response.data);
       await fetchMembers();
       
       toast({
@@ -302,27 +332,39 @@ export default function OrganizationMembersPage() {
     }
   };
 
+  // Remove member
   const handleRemoveMember = async (member: Member) => {
+    if (!organizationId) {
+      toast({
+        title: 'Error',
+        description: 'Organization ID is not available',
+        variant: 'destructive',
+      });
+      return;
+    }
+    
+    const displayName = member.user.first_name && member.user.last_name 
+      ? `${member.user.first_name} ${member.user.last_name}`
+      : member.user.username;
+
+    if (!confirm(`Are you sure you want to remove ${displayName} from the organization?`)) {
+      return;
+    }
+
     try {
-      // console.log('[ORG_MEMBERS] Removing member:', member.id);
+      await apiDelete(`/org/organizations/${organizationId}/members/${member.id}/`);
       
-      if (!organizationId) {
-        throw new Error('Organization ID not available');
-      }
-      
-      // Use the correct backend endpoint structure with user ID
-      const response = await apiDelete(`/org/organizations/${organizationId}/members/${member.user.id}/`);
-      
-      // console.log('[ORG_MEMBERS] Member removed:', response);
-      await fetchMembers();
+      // Update local state
+      setMembers(prevMembers => prevMembers.filter(m => m.id !== member.id));
       
       toast({
         title: 'Success',
-        description: 'Member removed successfully',
+        description: `${displayName} has been removed from the organization`,
       });
-    } catch (error) {
-      // console.error('[ORG_MEMBERS] Error removing member:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Failed to remove member';
+    } catch (error: any) {
+      console.error('Error removing member:', error);
+      const errorMessage = error.response?.data?.detail || 'Failed to remove member';
+      
       toast({
         title: 'Error',
         description: errorMessage,
@@ -331,30 +373,28 @@ export default function OrganizationMembersPage() {
     }
   };
 
-  // Fixed columns with proper IDs for nested accessors
+  // Table columns
   const columns: ColumnDef<Member>[] = [
     {
-      id: 'user_info', // Use id instead of accessorKey for complex cell
-      header: 'User',
+      accessorKey: 'user',
+      header: 'Member',
       cell: ({ row }) => {
         const user = row.original.user;
-        const displayName = user.first_name && user.last_name 
-          ? `${user.first_name} ${user.last_name}`
-          : user.username;
-        
+        const name = [user.first_name, user.last_name].filter(Boolean).join(' ') || user.username;
         return (
-          <div className="flex items-center">
-            <div className="h-8 w-8 rounded-full bg-gray-200 flex items-center justify-center mr-3">
-              {displayName?.charAt(0).toUpperCase() || 'U'}
+          <div className="flex items-center space-x-3">
+            <div className="flex-shrink-0 h-10 w-10 rounded-full bg-gray-200 flex items-center justify-center">
+              <span className="text-gray-600 font-medium">
+                {name.charAt(0).toUpperCase()}
+              </span>
             </div>
             <div>
-              <p className="font-medium">{displayName}</p>
+              <p className="text-sm font-medium text-gray-900">{name}</p>
               <p className="text-sm text-gray-500">{user.email}</p>
             </div>
           </div>
         );
       },
-      // Add filterFn for search functionality
       filterFn: (row, id, value) => {
         const user = row.original.user;
         const displayName = user.first_name && user.last_name 
@@ -367,81 +407,60 @@ export default function OrganizationMembersPage() {
     {
       accessorKey: 'role',
       header: 'Role',
-      cell: ({ row }) => {
-        const roleInfo = getRoleInfo(row.original.role);
-        return (
-          <span className={`px-2 py-1 text-xs rounded-full ${roleInfo.color}`}>
-            {roleInfo.name}
-          </span>
-        );
-      },
+      cell: ({ row }) => (
+        <RoleDropdown 
+          member={row.original} 
+          onRoleUpdate={updateMemberRole} 
+        />
+      ),
     },
     {
       accessorKey: 'is_active',
       header: 'Status',
       cell: ({ row }) => {
-        const isActive = row.original.is_active;
-        const statusInfo = isActive 
-          ? { label: 'Active', color: 'bg-green-100 text-green-800' }
-          : { label: 'Inactive', color: 'bg-gray-100 text-gray-800' };
-        
+        const status = row.original.is_active ? 'active' : 'inactive';
+        const variant = status === 'active' ? 'default' : 'outline';
         return (
-          <span className={`px-2 py-1 text-xs rounded-full ${statusInfo.color}`}>
-            {statusInfo.label}
-          </span>
+          <Badge variant={variant as any}>
+            {status.charAt(0).toUpperCase() + status.slice(1)}
+          </Badge>
         );
       },
     },
     {
       accessorKey: 'created_at',
-      header: 'Member Since',
+      header: 'Joined',
       cell: ({ row }) => {
-        if (!row.original.created_at) return 'N/A';
-        const date = new Date(row.original.created_at);
-        return date.toLocaleDateString('en-US', {
-          year: 'numeric',
-          month: 'short',
-          day: 'numeric',
-        });
-      },
-    },
-    {
-      accessorKey: 'updated_at',
-      header: 'Last Updated',
-      cell: ({ row }) => {
-        if (!row.original.updated_at) return 'N/A';
-        const date = new Date(row.original.updated_at);
-        return date.toLocaleDateString('en-US', {
-          year: 'numeric',
-          month: 'short',
-          day: 'numeric',
-        });
+        return format(new Date(row.original.created_at), 'MMM d, yyyy');
       },
     },
     {
       id: 'actions',
       header: 'Actions',
-      cell: ({ row }) => (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" className="h-8 w-8 p-0">
-              <span className="sr-only">Open menu</span>
-              <MoreHorizontal className="h-4 w-4" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={() => handleEditMember(row.original)}>
-              Edit
-            </DropdownMenuItem>
-            <DropdownMenuItem 
-              onClick={() => handleRemoveMember(row.original)}
-              className="text-red-600"
-            >
-              Remove
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      ),
+      cell: ({ row }) => {
+        const member = row.original;
+        return (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" className="h-8 w-8 p-0">
+                <span className="sr-only">Open menu</span>
+                <MoreHorizontal className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => handleEditMember(member)}>
+                Edit
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                className="text-red-600"
+                onClick={() => handleRemoveMember(member)}
+              >
+                Remove
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        );
+      },
     },
   ];
 
@@ -535,16 +554,19 @@ export default function OrganizationMembersPage() {
         open={isAddMemberOpen} 
         onOpenChange={setIsAddMemberOpen}
         onSuccess={handleMemberAdded}
+        organizationId={organizationId || undefined}
       />
 
       <div className="rounded-md border">
         <DataTable
           columns={columns}
           data={members}
-          searchKey="user_info" // Use the column id instead of nested key
+          searchKey="user"
           className="w-full"
         />
       </div>
     </div>
   );
-}
+};
+
+export default OrganizationMembersPage;

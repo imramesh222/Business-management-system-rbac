@@ -105,13 +105,23 @@ class User(AbstractBaseUser, PermissionsMixin):
         related_query_name="user",
     )
 
-    USERNAME_FIELD = 'username'
-    REQUIRED_FIELDS = ['email']
+    USERNAME_FIELD = 'email'
+    REQUIRED_FIELDS = ['username']
+
+    @property
+    def requires_password_change(self):
+        return hasattr(self, 'profile') and getattr(self.profile, 'password_change_required', False)
 
     objects = UserManager()
 
     def __str__(self):
-        return self.username
+        return self.email
+
+    def save(self, *args, **kwargs):
+        # Create a profile if it doesn't exist
+        if not hasattr(self, 'profile'):
+            UserProfile.objects.create(user=self)
+        super().save(*args, **kwargs)
 
     def get_full_name(self):
         if self.first_name and self.last_name:
@@ -122,5 +132,56 @@ class User(AbstractBaseUser, PermissionsMixin):
         return self.first_name if self.first_name else self.username
 
     class Meta:
+        db_table = 'users'
         verbose_name = _('user')
         verbose_name_plural = _('users')
+
+
+import datetime
+from django.utils import timezone
+
+class UserProfile(models.Model):
+    """Extended user profile information."""
+    user = models.OneToOneField(
+        User,
+        on_delete=models.CASCADE,
+        related_name='profile',
+        primary_key=True
+    )
+    password_change_required = models.BooleanField(
+        default=True,  # Changed default to True to force password change on first login
+        help_text='If True, user will be prompted to change their password on next login.'
+    )
+    otp = models.CharField(max_length=6, null=True, blank=True)
+    otp_created_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    def generate_otp(self, length=6):
+        """Generate a one-time password and set its expiration."""
+        import random
+        import string
+        
+        # Generate a random 6-digit OTP
+        self.otp = ''.join(random.choices(string.digits, k=length))
+        self.otp_created_at = timezone.now()
+        self.save()
+        return self.otp
+        
+    def is_otp_valid(self, otp):
+        """Check if the provided OTP is valid and not expired."""
+        if not self.otp or not self.otp_created_at:
+            return False
+            
+        # OTP expires after 24 hours
+        expiry_time = self.otp_created_at + datetime.timedelta(hours=24)
+        return self.otp == otp and timezone.now() <= expiry_time
+        
+    def clear_otp(self):
+        """Clear the OTP after successful use."""
+        self.otp = None
+        self.otp_created_at = None
+        self.save()
+
+    def __str__(self):
+        return f"Profile for {self.user.email}"

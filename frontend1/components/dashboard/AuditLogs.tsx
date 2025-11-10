@@ -1,7 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { useState, useEffect } from 'react';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -26,10 +26,16 @@ import {
   Settings,
   AlertTriangle,
   Eye,
-  Clock
+  Clock,
+  Loader2,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
+import { getAuditLogs, exportAuditLogs, getAuditLogStats } from '@/services/auditService';
+import { toast } from '@/components/ui/use-toast';
+import { formatDistanceToNow, format } from 'date-fns';
 
-interface LogEntry {
+export interface LogEntry {
   id: string;
   timestamp: string;
   user: string;
@@ -42,100 +48,113 @@ interface LogEntry {
   category: 'user' | 'system' | 'security' | 'organization';
 }
 
-const mockLogs: LogEntry[] = [
-  {
-    id: '1',
-    timestamp: '2024-01-15 14:32:15',
-    user: 'admin@example.com',
-    action: 'User Created',
-    resource: 'User: john.doe@example.com',
-    details: 'New user account created with Admin role',
-    ip: '192.168.1.100',
-    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-    status: 'success',
-    category: 'user'
-  },
-  {
-    id: '2',
-    timestamp: '2024-01-15 14:28:42',
-    user: 'system',
-    action: 'Backup Completed',
-    resource: 'System Backup',
-    details: 'Automated daily backup completed successfully',
-    ip: '127.0.0.1',
-    userAgent: 'System Process',
-    status: 'success',
-    category: 'system'
-  },
-  {
-    id: '3',
-    timestamp: '2024-01-15 14:15:33',
-    user: 'unknown@suspicious.com',
-    action: 'Failed Login Attempt',
-    resource: 'Authentication',
-    details: 'Multiple failed login attempts detected',
-    ip: '203.0.113.45',
-    userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36',
-    status: 'failed',
-    category: 'security'
-  },
-  {
-    id: '4',
-    timestamp: '2024-01-15 13:45:21',
-    user: 'manager@company.com',
-    action: 'Organization Updated',
-    resource: 'Org: TechCorp Inc.',
-    details: 'Organization settings modified',
-    ip: '192.168.1.105',
-    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
-    status: 'success',
-    category: 'organization'
-  },
-  {
-    id: '5',
-    timestamp: '2024-01-15 13:20:18',
-    user: 'admin@example.com',
-    action: 'Role Permissions Modified',
-    resource: 'Role: Manager',
-    details: 'Updated permissions for Manager role',
-    ip: '192.168.1.100',
-    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-    status: 'warning',
-    category: 'user'
-  },
-];
-
 export function AuditLogs() {
-  const [logs, setLogs] = useState<LogEntry[]>(mockLogs);
+  const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
-  const [categoryFilter, setCategoryFilter] = useState('all');
-  const [selectedLog, setSelectedLog] = useState<LogEntry | null>(null);
-
-  const filteredLogs = logs.filter(log => {
-    const matchesSearch = log.user.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         log.action.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         log.resource.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         log.details.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesStatus = statusFilter === 'all' || log.status === statusFilter;
-    const matchesCategory = categoryFilter === 'all' || log.category === categoryFilter;
-    return matchesSearch && matchesStatus && matchesCategory;
+  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [categoryFilter, setCategoryFilter] = useState<string>('all');
+  const [pagination, setPagination] = useState({
+    page: 1,
+    limit: 10,
+    total: 0
+  });
+  const [stats, setStats] = useState({
+    total: 0,
+    byStatus: [] as { status: string; count: number }[],
+    byCategory: [] as { category: string; count: number }[],
+    byDay: [] as { date: string; count: number }[]
   });
 
-  const getStatusBadge = (status: LogEntry['status']) => {
-    switch (status) {
-      case 'success':
-        return <Badge className="bg-green-100 text-green-800">Success</Badge>;
-      case 'failed':
-        return <Badge variant="destructive">Failed</Badge>;
-      case 'warning':
-        return <Badge className="bg-yellow-100 text-yellow-800">Warning</Badge>;
-      default:
-        return <Badge variant="outline">{status}</Badge>;
+  const fetchLogs = async () => {
+    try {
+      setLoading(true);
+      const params = {
+        page: pagination.page,
+        limit: pagination.limit,
+        search: searchTerm,
+        status: statusFilter !== 'all' ? statusFilter : undefined,
+        category: categoryFilter !== 'all' ? categoryFilter : undefined,
+      };
+      
+      const data = await getAuditLogs(params);
+      setLogs(data.data);
+      setPagination(prev => ({
+        ...prev,
+        total: data.total
+      }));
+    } catch (error) {
+      console.error('Error fetching audit logs:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to fetch audit logs. Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setLoading(false);
     }
   };
 
-  const getCategoryIcon = (category: LogEntry['category']) => {
+  const fetchStats = async () => {
+    try {
+      const data = await getAuditLogStats();
+      setStats(data);
+    } catch (error) {
+      console.error('Error fetching audit log stats:', error);
+    }
+  };
+
+  useEffect(() => {
+    fetchLogs();
+    fetchStats();
+  }, [pagination.page, pagination.limit, statusFilter, categoryFilter]);
+
+  const handleExport = async (format: 'csv' | 'pdf' | 'json' = 'csv') => {
+    try {
+      setExporting(true);
+      await exportAuditLogs(format, {
+        search: searchTerm,
+        status: statusFilter !== 'all' ? statusFilter : undefined,
+        category: categoryFilter !== 'all' ? categoryFilter : undefined,
+      });
+      
+      toast({
+        title: 'Export successful',
+        description: `Audit logs exported as ${format.toUpperCase()} successfully.`,
+      });
+    } catch (error) {
+      console.error('Error exporting audit logs:', error);
+      toast({
+        title: 'Export failed',
+        description: 'Failed to export audit logs. Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const handleSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    setPagination(prev => ({ ...prev, page: 1 }));
+    fetchLogs();
+  };
+
+  const getStatusBadge = (status: string) => {
+    switch (status) {
+      case 'success':
+        return <Badge variant="default" className="bg-green-500 hover:bg-green-600">Success</Badge>;
+      case 'failed':
+        return <Badge variant="destructive">Failed</Badge>;
+      case 'warning':
+        return <Badge variant="secondary" className="bg-yellow-500 hover:bg-yellow-600">Warning</Badge>;
+      default:
+        return <Badge variant="outline">Unknown</Badge>;
+    }
+  };
+
+  const getCategoryIcon = (category: string) => {
     switch (category) {
       case 'user':
         return <Users className="h-4 w-4" />;
@@ -150,222 +169,253 @@ export function AuditLogs() {
     }
   };
 
-  const stats = {
-    total: logs.length,
-    success: logs.filter(log => log.status === 'success').length,
-    failed: logs.filter(log => log.status === 'failed').length,
-    warning: logs.filter(log => log.status === 'warning').length,
+  const handlePageChange = (newPage: number) => {
+    setPagination(prev => ({
+      ...prev,
+      page: Math.max(1, Math.min(newPage, Math.ceil(pagination.total / pagination.limit)))
+    }));
   };
 
+  const totalPages = Math.ceil(pagination.total / pagination.limit);
+
   return (
-    <div className="p-6 space-y-6">
+    <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Audit Logs</h1>
-          <p className="mt-2 text-gray-600">Monitor system activities and security events</p>
+          <h2 className="text-2xl font-bold tracking-tight">Audit Logs</h2>
+          <p className="text-muted-foreground">View and manage system audit logs</p>
         </div>
-        <Button>
-          <Download className="h-4 w-4 mr-2" />
-          Export Logs
-        </Button>
+        <div className="flex space-x-2">
+          <Button 
+            variant="outline" 
+            onClick={() => handleExport('csv')}
+            disabled={exporting}
+          >
+            {exporting ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Exporting...
+              </>
+            ) : (
+              <>
+                <Download className="mr-2 h-4 w-4" />
+                Export CSV
+              </>
+            )}
+          </Button>
+          <Button 
+            variant="outline" 
+            onClick={() => handleExport('pdf')}
+            disabled={exporting}
+          >
+            <FileText className="mr-2 h-4 w-4" />
+            Export PDF
+          </Button>
+        </div>
       </div>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-600 flex items-center">
-              <FileText className="h-4 w-4 mr-2" />
-              Total Events
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-gray-900">{stats.total}</div>
-            <p className="text-xs text-gray-500 mt-1">Last 24 hours</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-600">Success</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-green-600">{stats.success}</div>
-            <p className="text-xs text-gray-500 mt-1">{((stats.success / stats.total) * 100).toFixed(1)}% of total</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-600">Failed</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-red-600">{stats.failed}</div>
-            <p className="text-xs text-gray-500 mt-1">{((stats.failed / stats.total) * 100).toFixed(1)}% of total</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-600">Warnings</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-yellow-600">{stats.warning}</div>
-            <p className="text-xs text-gray-500 mt-1">{((stats.warning / stats.total) * 100).toFixed(1)}% of total</p>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Audit Logs Table */}
       <Card>
         <CardHeader>
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between space-y-4 md:space-y-0">
             <div>
-              <CardTitle>System Activity Logs</CardTitle>
-              <CardDescription>Complete audit trail of system activities</CardDescription>
+              <CardTitle>Audit Logs</CardTitle>
+              <CardDescription>
+                View and filter system audit logs
+              </CardDescription>
             </div>
-            <div className="flex items-center space-x-2">
-              <Button variant="outline" size="sm">
-                <Calendar className="h-4 w-4 mr-2" />
-                Date Range
+            <form onSubmit={handleSearch} className="flex space-x-2">
+              <div className="relative">
+                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input
+                  type="search"
+                  placeholder="Search logs..."
+                  className="pl-8 w-[200px] lg:w-[300px]"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                />
+              </div>
+              <Select 
+                value={statusFilter} 
+                onValueChange={(value) => setStatusFilter(value)}
+              >
+                <SelectTrigger className="w-[150px]">
+                  <Filter className="mr-2 h-4 w-4" />
+                  <SelectValue placeholder="Status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Statuses</SelectItem>
+                  <SelectItem value="success">Success</SelectItem>
+                  <SelectItem value="failed">Failed</SelectItem>
+                  <SelectItem value="warning">Warning</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select 
+                value={categoryFilter} 
+                onValueChange={(value) => setCategoryFilter(value)}
+              >
+                <SelectTrigger className="w-[150px]">
+                  <Filter className="mr-2 h-4 w-4" />
+                  <SelectValue placeholder="Category" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Categories</SelectItem>
+                  <SelectItem value="user">User</SelectItem>
+                  <SelectItem value="system">System</SelectItem>
+                  <SelectItem value="security">Security</SelectItem>
+                  <SelectItem value="organization">Organization</SelectItem>
+                </SelectContent>
+              </Select>
+              <Button type="submit" variant="outline">
+                <Search className="mr-2 h-4 w-4" />
+                Search
               </Button>
-              <Button variant="outline" size="sm">
-                <Filter className="h-4 w-4" />
-              </Button>
-            </div>
+            </form>
           </div>
         </CardHeader>
         <CardContent>
-          {/* Search and Filters */}
-          <div className="flex items-center space-x-4 mb-6">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
-              <Input
-                placeholder="Search logs..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-10"
-              />
-            </div>
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-32">
-                <SelectValue placeholder="Status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Status</SelectItem>
-                <SelectItem value="success">Success</SelectItem>
-                <SelectItem value="failed">Failed</SelectItem>
-                <SelectItem value="warning">Warning</SelectItem>
-              </SelectContent>
-            </Select>
-            <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-              <SelectTrigger className="w-40">
-                <SelectValue placeholder="Category" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Categories</SelectItem>
-                <SelectItem value="user">User</SelectItem>
-                <SelectItem value="system">System</SelectItem>
-                <SelectItem value="security">Security</SelectItem>
-                <SelectItem value="organization">Organization</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* Logs Table */}
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Timestamp</TableHead>
-                <TableHead>User</TableHead>
-                <TableHead>Action</TableHead>
-                <TableHead>Resource</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>IP Address</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filteredLogs.map((log) => (
-                <TableRow key={log.id} className="hover:bg-gray-50">
-                  <TableCell>
-                    <div className="flex items-center">
-                      <Clock className="h-4 w-4 mr-2 text-gray-400" />
-                      <span className="text-sm">{log.timestamp}</span>
-                    </div>
-                  </TableCell>
-                  <TableCell className="font-medium">{log.user}</TableCell>
-                  <TableCell>
-                    <div className="flex items-center">
-                      {getCategoryIcon(log.category)}
-                      <span className="ml-2">{log.action}</span>
-                    </div>
-                  </TableCell>
-                  <TableCell className="text-gray-600">{log.resource}</TableCell>
-                  <TableCell>{getStatusBadge(log.status)}</TableCell>
-                  <TableCell className="font-mono text-sm">{log.ip}</TableCell>
-                  <TableCell className="text-right">
-                    <Button 
-                      variant="ghost" 
-                      size="sm"
-                      onClick={() => setSelectedLog(log)}
-                    >
-                      <Eye className="h-4 w-4" />
-                    </Button>
-                  </TableCell>
+          <div className="rounded-md border">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Timestamp</TableHead>
+                  <TableHead>User</TableHead>
+                  <TableHead>Action</TableHead>
+                  <TableHead>Resource</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Category</TableHead>
+                  <TableHead>Details</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {loading ? (
+                  <TableRow>
+                    <TableCell colSpan={7} className="text-center py-8">
+                      <div className="flex flex-col items-center justify-center space-y-2">
+                        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                        <p className="text-sm text-muted-foreground">Loading logs...</p>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ) : logs.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={7} className="text-center py-8">
+                      <div className="flex flex-col items-center justify-center space-y-2">
+                        <FileText className="h-8 w-8 text-muted-foreground" />
+                        <p className="text-sm text-muted-foreground">No logs found</p>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  logs.map((log) => (
+                    <TableRow key={log.id}>
+                      <TableCell className="whitespace-nowrap">
+                        <div className="flex items-center">
+                          <Clock className="mr-2 h-4 w-4 text-muted-foreground" />
+                          <div className="text-sm">
+                            <div>{format(new Date(log.timestamp), 'MMM d, yyyy')}</div>
+                            <div className="text-xs text-muted-foreground">
+                              {format(new Date(log.timestamp), 'h:mm a')}
+                            </div>
+                          </div>
+                        </div>
+                      </TableCell>
+                      <TableCell className="font-medium">{log.user}</TableCell>
+                      <TableCell>{log.action}</TableCell>
+                      <TableCell className="max-w-[200px] truncate">{log.resource}</TableCell>
+                      <TableCell>{getStatusBadge(log.status)}</TableCell>
+                      <TableCell>
+                        <div className="flex items-center">
+                          {getCategoryIcon(log.category)}
+                          <span className="ml-2 capitalize">{log.category}</span>
+                        </div>
+                      </TableCell>
+                      <TableCell className="max-w-[300px] truncate">{log.details}</TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
         </CardContent>
+        <CardFooter className="flex items-center justify-between px-6 py-4 border-t">
+          <div className="text-sm text-muted-foreground">
+            Showing <span className="font-medium">{(pagination.page - 1) * pagination.limit + 1}</span> to{' '}
+            <span className="font-medium">
+              {Math.min(pagination.page * pagination.limit, pagination.total)}
+            </span>{' '}
+            of <span className="font-medium">{pagination.total}</span> logs
+          </div>
+          <div className="flex items-center space-x-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => handlePageChange(pagination.page - 1)}
+              disabled={pagination.page === 1 || loading}
+            >
+              <ChevronLeft className="h-4 w-4" />
+              <span className="ml-2">Previous</span>
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => handlePageChange(pagination.page + 1)}
+              disabled={pagination.page >= totalPages || loading}
+            >
+              <span className="mr-2">Next</span>
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
+        </CardFooter>
       </Card>
 
-      {/* Log Detail Modal */}
-      {selectedLog && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 max-w-2xl w-full mx-4">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold">Log Entry Details</h3>
-              <Button variant="ghost" size="sm" onClick={() => setSelectedLog(null)}>
-                ×
-              </Button>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium">Total Logs</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{stats.total.toLocaleString()}</div>
+            <p className="text-xs text-muted-foreground">
+              {formatDistanceToNow(new Date(), { addSuffix: true })}
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium">By Status</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {stats.byStatus.map((stat) => (
+                <div key={stat.status} className="flex items-center justify-between">
+                  <div className="flex items-center">
+                    {getStatusBadge(stat.status)}
+                  </div>
+                  <div className="font-medium">{stat.count}</div>
+                </div>
+              ))}
             </div>
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-sm font-medium text-gray-500">Timestamp</label>
-                  <p className="text-sm">{selectedLog.timestamp}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium">By Category</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {stats.byCategory.map((stat) => (
+                <div key={stat.category} className="flex items-center justify-between">
+                  <div className="flex items-center">
+                    {getCategoryIcon(stat.category as any)}
+                    <span className="ml-2 capitalize">{stat.category}</span>
+                  </div>
+                  <div className="font-medium">{stat.count}</div>
                 </div>
-                <div>
-                  <label className="text-sm font-medium text-gray-500">Status</label>
-                  <div className="mt-1">{getStatusBadge(selectedLog.status)}</div>
-                </div>
-                <div>
-                  <label className="text-sm font-medium text-gray-500">User</label>
-                  <p className="text-sm">{selectedLog.user}</p>
-                </div>
-                <div>
-                  <label className="text-sm font-medium text-gray-500">IP Address</label>
-                  <p className="text-sm font-mono">{selectedLog.ip}</p>
-                </div>
-              </div>
-              <div>
-                <label className="text-sm font-medium text-gray-500">Action</label>
-                <p className="text-sm">{selectedLog.action}</p>
-              </div>
-              <div>
-                <label className="text-sm font-medium text-gray-500">Resource</label>
-                <p className="text-sm">{selectedLog.resource}</p>
-              </div>
-              <div>
-                <label className="text-sm font-medium text-gray-500">Details</label>
-                <p className="text-sm">{selectedLog.details}</p>
-              </div>
-              <div>
-                <label className="text-sm font-medium text-gray-500">User Agent</label>
-                <p className="text-sm break-all">{selectedLog.userAgent}</p>
-              </div>
+              ))}
             </div>
-          </div>
-        </div>
-      )}
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }

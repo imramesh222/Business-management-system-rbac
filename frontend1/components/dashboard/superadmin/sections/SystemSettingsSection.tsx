@@ -195,7 +195,7 @@ export function SystemSettingsSection() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label>SMTP Host</Label>
-                    <Input placeholder="smtp.example.com" />
+                    <Input placeholder="imrameshrawat@gmail.com" />
                   </div>
                   <div className="space-y-2">
                     <Label>SMTP Port</Label>

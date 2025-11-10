@@ -29,8 +29,15 @@ import {
   Clock,
   Loader2,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  ChevronDown
 } from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { getAuditLogs, exportAuditLogs, getAuditLogStats } from '@/services/auditService';
 import { toast } from '@/components/ui/use-toast';
 import { formatDistanceToNow, format } from 'date-fns';
@@ -111,25 +118,49 @@ export function AuditLogs() {
   }, [pagination.page, pagination.limit, statusFilter, categoryFilter]);
 
   const handleExport = async (format: 'csv' | 'pdf' | 'json' = 'csv') => {
+    let toastRef: { id: string; dismiss: () => void } | null = null;
+    
     try {
       setExporting(true);
-      await exportAuditLogs(format, {
+      
+      // Show loading toast
+      toastRef = toast({
+        title: 'Exporting...',
+        description: `Preparing your ${format.toUpperCase()} export. Please wait.`,
+      });
+      
+      // Call the export function
+      const result = await exportAuditLogs(format, {
         search: searchTerm,
         status: statusFilter !== 'all' ? statusFilter : undefined,
         category: categoryFilter !== 'all' ? categoryFilter : undefined,
+        startDate: undefined, // Add if you have date filters
+        endDate: undefined,   // Add if you have date filters
       });
       
+      // Dismiss loading toast and show success
+      if (toastRef) toastRef.dismiss();
+      
       toast({
-        title: 'Export successful',
-        description: `Audit logs exported as ${format.toUpperCase()} successfully.`,
+        title: 'Export Successful',
+        description: `Audit logs have been exported as ${format.toUpperCase()}.`,
       });
+      
+      return result;
     } catch (error) {
       console.error('Error exporting audit logs:', error);
+      
+      // Dismiss loading toast if it exists
+      if (toastRef) toastRef.dismiss();
+      
+      // Show error toast with more details
       toast({
-        title: 'Export failed',
-        description: 'Failed to export audit logs. Please try again.',
+        title: 'Export Failed',
+        description: error instanceof Error ? error.message : 'Failed to export audit logs. Please try again.',
         variant: 'destructive',
       });
+      
+      throw error;
     } finally {
       setExporting(false);
     }
@@ -186,31 +217,38 @@ export function AuditLogs() {
           <p className="text-muted-foreground">View and manage system audit logs</p>
         </div>
         <div className="flex space-x-2">
-          <Button 
-            variant="outline" 
-            onClick={() => handleExport('csv')}
-            disabled={exporting}
-          >
-            {exporting ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Exporting...
-              </>
-            ) : (
-              <>
-                <Download className="mr-2 h-4 w-4" />
-                Export CSV
-              </>
-            )}
-          </Button>
-          <Button 
-            variant="outline" 
-            onClick={() => handleExport('pdf')}
-            disabled={exporting}
-          >
-            <FileText className="mr-2 h-4 w-4" />
-            Export PDF
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" disabled={exporting}>
+                {exporting ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Exporting...
+                  </>
+                ) : (
+                  <>
+                    <Download className="mr-2 h-4 w-4" />
+                    Export
+                    <ChevronDown className="ml-2 h-4 w-4" />
+                  </>
+                )}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => handleExport('pdf')}>
+                <FileText className="mr-2 h-4 w-4" />
+                Export as PDF
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleExport('csv')}>
+                <FileText className="mr-2 h-4 w-4" />
+                Export as CSV
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleExport('json')}>
+                <FileText className="mr-2 h-4 w-4" />
+                Export as JSON
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
 

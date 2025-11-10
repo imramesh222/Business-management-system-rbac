@@ -6,40 +6,37 @@ from django.http import HttpResponse
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
 from reportlab.lib import colors
-from rest_framework import viewsets, permissions, status
+from rest_framework import status
 from rest_framework.response import Response
-from rest_framework.decorators import action
-from django.db.models import Q
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
+from django.db.models import Q
 
 from .models import ActivityLog, ActivityType
-from .serializers import ActivityLogSerializer
-from apps.users.permissions import IsSuperAdmin
+from ..users.permissions import IsSuperAdmin
 
-class ActivityLogViewSet(viewsets.ReadOnlyModelViewSet):
-    """
-    API endpoint that allows activity logs to be viewed.
-    """
-    serializer_class = ActivityLogSerializer
-    permission_classes = [permissions.IsAuthenticated, IsSuperAdmin]
-    
-    def get_queryset(self):
-        # Only show logs from the last 30 days by default
+class ExportActivityLogsView(APIView):
+    permission_classes = [IsAuthenticated, IsSuperAdmin]
+
+    def get(self, request, *args, **kwargs):
+        """
+        Export activity logs in the specified format (csv, pdf, or json).
+        """
+        format_type = request.query_params.get('format', 'csv').lower()
+        
+        # Get the base queryset
         queryset = ActivityLog.objects.all().select_related('user')
         
-        # Filter by user if specified
-        user_id = self.request.query_params.get('user_id')
+        # Apply filters
+        user_id = request.query_params.get('user_id')
         if user_id:
             queryset = queryset.filter(user_id=user_id)
             
-        # Filter by activity type if specified
-        activity_type = self.request.query_params.get('activity_type')
+        activity_type = request.query_params.get('activity_type')
         if activity_type in dict(ActivityType.choices):
             queryset = queryset.filter(activity_type=activity_type)
             
-        # Search in details if search parameter is provided
-        search = self.request.query_params.get('search')
+        search = request.query_params.get('search')
         if search:
             queryset = queryset.filter(
                 Q(user__username__icontains=search) |
@@ -48,62 +45,11 @@ class ActivityLogViewSet(viewsets.ReadOnlyModelViewSet):
                 Q(object_type__icontains=search) |
                 Q(ip_address__icontains=search)
             )
-            
-        return queryset.order_by('-created_at')
-    
-    @action(detail=False, methods=['get'])
-    def recent(self, request):
-        """
-        Get recent activities for the dashboard.
-        """
-        limit = min(int(request.query_params.get('limit', 20)), 100)
-        queryset = self.get_queryset()[:limit]
-        serializer = self.get_serializer(queryset, many=True)
-        return Response(serializer.data)
-    
-    @action(detail=False, methods=['get'])
-    def summary(self, request):
-        """
-        Get summary statistics for activities.
-        """
-        from django.db.models import Count, F, Value
-        from django.db.models.functions import TruncDay, TruncHour
         
-        # Activity counts by type
-        by_type = ActivityLog.objects.values('activity_type').annotate(
-            count=Count('activity_type'),
-            label=F('activity_type')
-        )
+        # Order by most recent first
+        queryset = queryset.order_by('-created_at')
         
-        # Activities per day for the last 7 days
-        from datetime import datetime, timedelta
-        end_date = datetime.now()
-        start_date = end_date - timedelta(days=7)
-        
-        daily_activity = (
-            ActivityLog.objects
-            .filter(created_at__date__gte=start_date.date())
-            .annotate(date=TruncDay('created_at'))
-            .values('date')
-            .annotate(count=Count('id'))
-            .order_by('date')
-        )
-        
-        return Response({
-            'by_type': list(by_type),
-            'daily_activity': list(daily_activity),
-            'total_activities': ActivityLog.objects.count(),
-            'unique_users': ActivityLog.objects.values('user').distinct().count()
-        })
-        
-    @action(detail=False, methods=['get'], url_path='export', url_name='export')
-    def export(self, request, *args, **kwargs):
-        """
-        Export activity logs in the specified format (csv, pdf, or json).
-        """
-        format_type = request.query_params.get('format', 'csv').lower()
-        queryset = self.filter_queryset(self.get_queryset())
-        
+        # Call the appropriate export method
         if format_type == 'csv':
             return self.export_to_csv(queryset)
         elif format_type == 'pdf':
@@ -209,51 +155,3 @@ class ActivityLogViewSet(viewsets.ReadOnlyModelViewSet):
         filename = f'activity_logs_export_{datetime.now().strftime("%Y%m%d_%H%M%S")}.json'
         response['Content-Disposition'] = f'attachment; filename="{filename}"'
         return response
-
-
-@api_view(['GET'])
-@permission_classes([IsAuthenticated, IsSuperAdmin])
-def export_activity_logs(request):
-    """
-    Export activity logs in the specified format (csv, pdf, or json).
-    """
-    format_type = request.query_params.get('format', 'csv').lower()
-    
-    # Get the base queryset
-    queryset = ActivityLog.objects.all().select_related('user')
-    
-    # Apply filters
-    user_id = request.query_params.get('user_id')
-    if user_id:
-        queryset = queryset.filter(user_id=user_id)
-        
-    activity_type = request.query_params.get('activity_type')
-    if activity_type in dict(ActivityType.choices):
-        queryset = queryset.filter(activity_type=activity_type)
-        
-    search = request.query_params.get('search')
-    if search:
-        queryset = queryset.filter(
-            Q(user__username__icontains=search) |
-            Q(user__email__icontains=search) |
-            Q(details__icontains=search) |
-            Q(object_type__icontains=search) |
-            Q(ip_address__icontains=search)
-        )
-    
-    # Order by most recent first
-    queryset = queryset.order_by('-created_at')
-    
-    # Call the appropriate export method
-    view = ActivityLogViewSet()
-    if format_type == 'csv':
-        return view.export_to_csv(queryset)
-    elif format_type == 'pdf':
-        return view.export_to_pdf(queryset)
-    elif format_type == 'json':
-        return view.export_to_json(queryset)
-    else:
-        return Response(
-            {'error': 'Unsupported format. Use csv, pdf, or json.'},
-            status=status.HTTP_400_BAD_REQUEST
-        )

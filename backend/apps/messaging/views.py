@@ -62,9 +62,36 @@ class ConversationViewSet(viewsets.GenericViewSet,
             return CreateConversationSerializer
         return ConversationSerializer
     
-    def perform_create(self, serializer):
+    def create(self, request, *args, **kwargs):
         """Create a new conversation"""
-        serializer.save()
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        # Get participants from the request
+        participant_ids = serializer.validated_data.get('participant_ids', [])
+        is_group = serializer.validated_data.get('is_group', False)
+        name = serializer.validated_data.get('name', '')
+        
+        # Get user objects for participants
+        participants = User.objects.filter(id__in=participant_ids)
+        if not participants.exists():
+            return Response(
+                {"detail": "No valid participants provided"}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Create conversation
+        conversation = Conversation.objects.create(
+            is_group=is_group,
+            name=name if is_group and name else None
+        )
+        
+        # Add participants (including the current user)
+        conversation.participants.add(request.user, *participants)
+        
+        # Return the created conversation
+        response_serializer = ConversationSerializer(conversation, context={'request': request})
+        return Response(response_serializer.data, status=status.HTTP_201_CREATED)
     
     @action(detail=True, methods=['get'])
     def messages(self, request, pk=None):

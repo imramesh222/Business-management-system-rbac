@@ -1,8 +1,12 @@
 import random
 import string
 import logging
-from django.shortcuts import get_object_or_404
+from django.shortcuts import get_object_or_404, render
 from django.http import Http404
+from django.template.loader import render_to_string
+from django.template.exceptions import TemplateDoesNotExist
+from django.core.mail import send_mail, EmailMultiAlternatives
+from django.conf import settings
 from django.db import transaction
 from django.db.models import Q, Count
 from rest_framework import status, viewsets, permissions, mixins, serializers
@@ -276,26 +280,32 @@ class OrganizationMemberViewSet(viewsets.ModelViewSet):
                 )
                 print(f"Added existing user to organization: {member.id}")
                 
-                # Generate password reset token for existing users
-                from django.contrib.auth.tokens import default_token_generator
-                from django.utils.encoding import force_bytes
+                # Generate token and UID for password reset
                 from django.utils.http import urlsafe_base64_encode
+                from django.utils.encoding import force_bytes
+                from django.contrib.auth.tokens import default_token_generator
                 
                 # Generate token and UID for password reset
                 token = default_token_generator.make_token(user)
                 uid = urlsafe_base64_encode(force_bytes(user.pk))
-                reset_url = f"{settings.FRONTEND_URL}/reset-password/{uid}/{token}/"
+                # Using query parameters for better SPA compatibility
+                # Match the frontend's expected reset password URL
+                reset_url = f"{settings.FRONTEND_URL}/reset-password/?uid={uid}&token={token}"
                 
                 # Send organization invitation email with password reset link
                 try:
                     subject = f'You\'ve been added to {organization.name} on ProjectK'
-                    message = render_to_string('emails/organization_invitation.html', {
+                    # Prepare email context with all required variables
+                    email_context = {
                         'user': user,
                         'organization': organization,
                         'role': role,
                         'login_url': f'{settings.FRONTEND_URL}/login',
                         'reset_url': reset_url,
-                    })
+                    }
+                    
+                    # Render the email template
+                    message = render_to_string('emails/organization_invitation.html', email_context)
                     
                     send_mail(
                         subject=subject,
@@ -351,46 +361,74 @@ class OrganizationMemberViewSet(viewsets.ModelViewSet):
                 role=role,
                 is_active=True
             )
-            print(f"Successfully created organization member: {member.id}")
             
             # Send welcome email with credentials
             try:
                 subject = f'Welcome to {organization.name} on ProjectK'
-                message = render_to_string('emails/welcome_invitation.html', {
-                    'user': user,
-                    'organization': organization,
-                    'email': email,
-                    'otp': otp,  # Include OTP in the email
-                    'password': password,  # Include the generated password
-                    'login_url': f'{settings.FRONTEND_URL}/login',
-                })
                 
-                send_mail(
+                # Create a plain text version of the email
+                text_content = f"""
+                Welcome to {organization.name} on ProjectK!
+                
+                Your account has been created with the following details:
+                Email: {email}
+                Password: {password}
+                OTP: {otp}
+                
+                Please log in at: {settings.FRONTEND_URL}/login
+                
+                You will be prompted to change your password on first login.
+                """
+                
+                # Try to render HTML template, fallback to text if template doesn't exist
+                try:
+                    html_content = render_to_string('emails/welcome_invitation.html', {
+                        'user': user,
+                        'organization': organization,
+                        'email': email,
+                        'otp': otp,
+                        'password': password,
+                        'login_url': f'{settings.FRONTEND_URL}/login',
+                    })
+                except TemplateDoesNotExist:
+                    html_content = None
+                
+                # Send the email
+                email_message = EmailMultiAlternatives(
                     subject=subject,
-                    message='',
+                    body=text_content,
                     from_email=settings.DEFAULT_FROM_EMAIL,
-                    recipient_list=[email],
-                    html_message=message,
-                    fail_silently=False,
+                    to=[email],
+                    reply_to=[settings.REPLY_TO_EMAIL],
                 )
+                
+                if html_content:
+                    email_message.attach_alternative(html_content, 'text/html')
+                
+                email_message.send(fail_silently=False)
                 print(f"Welcome email sent to {email}")
                 
             except Exception as email_error:
-                print(f"Warning: Failed to send welcome email: {str(email_error)}")
-                # Don't fail the whole process if email fails
-                pass
+                error_msg = f"Failed to send welcome email to {email}: {str(email_error)}"
+                print(f"ERROR: {error_msg}")
+                # Log the full error for debugging
+                import traceback
+                traceback.print_exc()
                 
-            # Return success response
-            return Response(
-                {
-                    "message": "User invited successfully",
-                    "user_id": str(user.id),
-                    "email": email,
-                    "organization": organization.name,
-                    "role": role
-                },
-                status=status.HTTP_201_CREATED
-            )
+                # Return the error in the response but don't fail the user creation
+                return Response(
+                    {
+                        "message": "User created but failed to send welcome email",
+                        "error": str(email_error),
+                        "user_id": str(user.id),
+                        "email": email,
+                        "password": password,  # Include password in response since email failed
+                        "otp": otp,  # Include OTP in response since email failed
+                        "organization": organization.name,
+                        "role": role
+                    },
+                    status=status.HTTP_201_CREATED
+                )
             
         except Exception as e:
             print(f"Unexpected error in user lookup/creation: {str(e)}")

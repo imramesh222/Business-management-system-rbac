@@ -10,7 +10,7 @@ class RoleChoices(models.TextChoices):
     SUPERADMIN = 'superadmin', 'Superadmin'  # Only for system-wide superusers
 
 class UserManager(BaseUserManager):
-    def create_user(self, username=None, email=None, password=None, **extra_fields):
+    def _create_user(self, username, email, password=None, **extra_fields):
         if not email:
             raise ValueError('The Email must be set')
             
@@ -20,38 +20,56 @@ class UserManager(BaseUserManager):
         if not username:
             # Use the part before @ in the email as the base for username
             base_username = email.split('@')[0]
-            
             # Clean the username to ensure it's valid
             import re
             base_username = re.sub(r'[^a-zA-Z0-9_]', '', base_username)
-            
             # If the username is empty after cleaning, use a default
             if not base_username:
                 base_username = 'user'
-                
             username = base_username
             
-            # Ensure username is unique and not empty
-            counter = 1
-            while not username or User.objects.filter(username__iexact=username).exists():
-                username = f"{base_username}{counter}"
-                counter += 1
-        
-        # Ensure username is not empty
-        if not username:
-            raise ValueError('Could not generate a valid username')
+        # Ensure username is unique
+        counter = 1
+        original_username = username
+        while self.model.objects.filter(username=username).exists():
+            username = f"{original_username}{counter}"
+            counter += 1
             
-        # Ensure username is unique (case-insensitive check)
-        if User.objects.filter(username__iexact=username).exists():
-            raise ValueError('A user with this username already exists')
-        
         user = self.model(username=username, email=email, **extra_fields)
-        
         if password:
             user.set_password(password)
-        
         user.save(using=self._db)
         return user
+        
+    def create_user(self, username=None, email=None, password=None, **extra_fields):
+        extra_fields.setdefault('is_staff', False)
+        extra_fields.setdefault('is_superuser', False)
+        return self._create_user(username, email, password, **extra_fields)
+        
+    def create_superuser(self, username, email, password, **extra_fields):
+        extra_fields.setdefault('is_staff', True)
+        extra_fields.setdefault('is_superuser', True)
+        extra_fields.setdefault('is_active', True)
+        extra_fields.setdefault('role', RoleChoices.SUPERADMIN)
+
+        if extra_fields.get('is_staff') is not True:
+            raise ValueError('Superuser must have is_staff=True.')
+        if extra_fields.get('is_superuser') is not True:
+            raise ValueError('Superuser must have is_superuser=True.')
+
+        return self._create_user(username, email, password, **extra_fields)
+        
+    def make_random_password(self, length=12,
+                           allowed_chars='abcdefghjkmnpqrstuvwxyz'
+                                        'ABCDEFGHJKLMNPQRSTUVWXYZ'
+                                        '23456789'):
+        """
+        Generate a random password with the given length and given
+        allowed_chars. The default value of allowed_chars doesn't have "I" or "O"
+        or letters and digits that look similar -- just to avoid confusion.
+        """
+        from django.utils.crypto import get_random_string
+        return get_random_string(length, allowed_chars)
 
     def create_superuser(self, username, email, password, **extra_fields):
         extra_fields.setdefault('is_staff', True)
@@ -118,10 +136,13 @@ class User(AbstractBaseUser, PermissionsMixin):
         return self.email
 
     def save(self, *args, **kwargs):
-        # Create a profile if it doesn't exist
-        if not hasattr(self, 'profile'):
-            UserProfile.objects.create(user=self)
+        # First save the user to get an ID
+        created = not self.pk  # Check if this is a new user
         super().save(*args, **kwargs)
+        
+        # Create a profile if it doesn't exist (only for new users)
+        if created and not hasattr(self, 'profile'):
+            UserProfile.objects.create(user=self)
 
     def get_full_name(self):
         if self.first_name and self.last_name:

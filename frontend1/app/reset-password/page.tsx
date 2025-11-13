@@ -18,70 +18,73 @@ export default function ResetPasswordPage() {
   const router = useRouter();
 
   useEffect(() => {
-    const token = searchParams.get('token');
-    const uid = searchParams.get('uid');
-    
-    if (!token || !uid) {
-      toast.error('Invalid or missing reset parameters');
-      router.push('/login');
-      return;
-    }
-    
-    setToken(token);
-    setUid(uid);
-  }, [searchParams, router]);
+  const token = searchParams.get('token');
+  const uid = searchParams.get('uid');
+  
+  if (!token || !uid) {
+    toast.error('Invalid or missing reset parameters');
+    router.push('/login');
+    return;
+  }
+  
+  // Store the raw values from the URL
+  setToken(token);
+  setUid(uid);
+}, [searchParams, router]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    if (password !== confirmPassword) {
-      toast.error('Passwords do not match');
-      return;
-    }
+const handleSubmit = async (e: React.FormEvent) => {
+  e.preventDefault();
+  
+  if (password !== confirmPassword) {
+    toast.error('Passwords do not match');
+    return;
+  }
 
-    if (!token || !uid) {
-      toast.error('Invalid reset parameters');
-      return;
-    }
+  if (!token || !uid) {
+    toast.error('Invalid reset parameters');
+    return;
+  }
 
-    setIsLoading(true);
-    
-    try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/users/auth/reset-password/`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ 
-          token,
-          uid,
-          new_password: password,
-          confirm_password: confirmPassword 
-        }),
-        credentials: 'include',
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.detail || 'Failed to reset password');
-      }
-
-      // Show success message
-      toast.success('Your password has been reset successfully! Redirecting to login...');
-      
-      // Redirect to login after a short delay
-      setTimeout(() => {
-        router.push('/login');
-      }, 2000);
-    } catch (error: unknown) {
-      console.error('Error:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Failed to reset password';
-      toast.error(errorMessage);
-    } finally {
-      setIsLoading(false);
-    }
+  setIsLoading(true);
+  
+  const requestData = { 
+    token,
+    uid,
+    new_password: password,
+    confirm_password: confirmPassword 
   };
+
+  console.log('Sending reset request with data:', JSON.stringify(requestData, null, 2));
+
+  try {
+    const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/users/auth/reset-password/`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(requestData),
+      credentials: 'include',
+    });
+
+    const data = await response.json();
+    console.log('Reset password response:', { status: response.status, data });
+
+    if (!response.ok) {
+      throw new Error(data.detail || data.message || 'Failed to reset password');
+    }
+
+    toast.success('Your password has been reset successfully! Redirecting to login...');
+    setTimeout(() => {
+      router.push('/login');
+    }, 2000);
+  } catch (error: unknown) {
+    console.error('Error in handleSubmit:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Failed to reset password';
+    toast.error(errorMessage);
+  } finally {
+    setIsLoading(false);
+  }
+};
 
   if (!token) {
     return (

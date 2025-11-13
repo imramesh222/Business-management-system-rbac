@@ -91,8 +91,11 @@ class ResetPasswordView(APIView):
     permission_classes = [AllowAny]
     
     def post(self, request):
+        logger.info(f"Reset password request data: {request.data}")
         serializer = ResetPasswordSerializer(data=request.data)
+        
         if not serializer.is_valid():
+            logger.error(f"Reset password validation errors: {serializer.errors}")
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         
         try:

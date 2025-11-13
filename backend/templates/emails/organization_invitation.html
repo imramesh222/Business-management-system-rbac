@@ -65,27 +65,34 @@
         <h1 style="margin: 0; font-size: 24px;">Welcome to {{ organization.name }}!</h1>
     </div>
     <div class="content">
-        <p>Hello {{ user.first_name|default:user.username }},</p>
+        <p>Hello {% if user.first_name %}{{ user.first_name }}{% else %}there{% endif %},</p>
         
-        <p>You've been added to <strong>{{ organization.name }}</strong> on ProjectK with the role of <strong>{{ role }}</strong>.</p>
+        <p>You've been added to <strong>{{ organization.name }}</strong> on ProjectK with the role of <strong>{{ role|title }}</strong>.</p>
         
         <div class="info-box">
             <p style="margin-top: 0;">
-                <strong>What's next?</strong> Sign in to your ProjectK account to access your organization's workspace, collaborate with your team, and get started with your projects.
+                <strong>Your login credentials:</strong>
+            </p>
+            <p style="margin: 10px 0 0 0;">
+                <strong>Email:</strong> {{ user.email }}
+            </p>
+            <p style="margin: 10px 0 0 0;">
+                <strong>Click the button below to set your password and log in.</strong>
             </p>
         </div>
 
-        <div class="warning-box">
-            <h3 style="margin-top: 0; color: #e67e22;">Action Required</h3>
-            <p>For security reasons, please set a new password for your account by clicking the button below:</p>
+        <div class="warning-box" style="background-color: #f8f9fa; border-left: 4px solid #4f46e5; padding: 15px; margin: 20px 0; border-radius: 4px;">
+            <h3 style="margin-top: 0; color: #4f46e5;">Action Required: Set Your Password</h3>
+            <p>To get started with your account, please set a new password by clicking the button below:</p>
             <div style="text-align: center; margin: 20px 0;">
-                <a href="{{ reset_url }}" class="button" style="background-color: #e67e22;">
+                <a href="{{ reset_url }}" class="button" style="display: inline-block; padding: 12px 24px; background-color: #4f46e5; color: white; text-decoration: none; border-radius: 6px; font-weight: bold;">
                     Set Your Password
                 </a>
             </div>
-            <p style="font-size: 12px; margin-bottom: 0;">
-                Or copy and paste this link into your browser:<br>
-                <a href="{{ reset_url }}" style="word-break: break-all; color: #4f46e5;">{{ reset_url }}</a>
+            <p style="font-size: 14px; margin: 10px 0 0 0; color: #6b7280;">
+                <strong>Note:</strong> This link will expire in 24 hours.<br>
+                If the button doesn't work, copy and paste this URL into your browser:<br>
+                <span style="word-break: break-all; color: #4f46e5;">{{ reset_url }}</span>
             </p>
         </div>
         

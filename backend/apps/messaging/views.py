@@ -178,18 +178,60 @@ class ConversationViewSet(viewsets.GenericViewSet,
             )
 
 class MessageViewSet(viewsets.GenericViewSet,
+                    mixins.ListModelMixin,
                     mixins.CreateModelMixin,
                     mixins.DestroyModelMixin):
     """
-    ViewSet for managing messages
+    ViewSet for managing messages.
     """
     permission_classes = [IsAuthenticated]
     serializer_class = MessageSerializer
+    http_method_names = ['get', 'post', 'delete']  # Explicitly allow GET, POST, DELETE
     
     def get_queryset(self):
-        return Message.objects.filter(
+        queryset = Message.objects.filter(
             conversation__participants=self.request.user
         ).select_related('sender', 'conversation')
+        
+        # Filter by conversation_id if provided in query params
+        conversation_id = self.request.query_params.get('conversation_id')
+        if conversation_id:
+            queryset = queryset.filter(conversation_id=conversation_id)
+            
+        return queryset.order_by('-timestamp')
+        
+    def list(self, request, *args, **kwargs):
+        """
+        List messages, optionally filtered by conversation_id.
+        """
+        queryset = self.filter_queryset(self.get_queryset())
+        
+        # If no conversation_id is provided, return 400
+        if not request.query_params.get('conversation_id'):
+            return Response(
+                {"detail": "conversation_id query parameter is required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+            
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+            
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
+        
+    def get_queryset(self):
+        queryset = Message.objects.filter(
+            conversation__participants=self.request.user
+        ).select_related('sender', 'conversation')
+        
+        # Filter by conversation_id if provided in query params
+        conversation_id = self.request.query_params.get('conversation_id')
+        if conversation_id:
+            queryset = queryset.filter(conversation_id=conversation_id)
+            
+        return queryset.order_by('-timestamp')
     
     def perform_create(self, serializer):
         """Save the message and update conversation timestamp"""

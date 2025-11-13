@@ -165,17 +165,37 @@ export const MessagingProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         // If this is a new conversation, we might need to add it
         if (!prev.some(conv => conv.id === conversationId)) {
           console.log('Adding new conversation for message');
+          // Create participants array with both sender and current user (if not the same)
+          const participants: Array<{
+            id: string;
+            email: string;
+            first_name: string;
+            last_name: string;
+            avatar: string | undefined;
+          }> = [
+            {
+              id: String(newMessage.sender.id),
+              email: newMessage.sender.email,
+              first_name: newMessage.sender.first_name,
+              last_name: newMessage.sender.last_name,
+              avatar: (newMessage.sender as any).avatar
+            }
+          ];
+          
+          // Add current user to participants if they're not the sender
+          if (user && String(user.id) !== String(newMessage.sender.id)) {
+            participants.push({
+              id: String(user.id),
+              email: user.email || '',
+              first_name: user.first_name || '',
+              last_name: user.last_name || '',
+              avatar: user.avatar
+            });
+          }
+          
           updated.push({
             id: conversationId,
-            participants: [
-              {
-                id: newMessage.sender.id,
-                email: newMessage.sender.email,
-                first_name: newMessage.sender.first_name,
-                last_name: newMessage.sender.last_name,
-                avatar: undefined
-              }
-            ],
+            participants,
             messages: [newMessage],
             last_message: newMessage,
             unread_count: 1,
@@ -465,8 +485,9 @@ export const MessagingProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
     setLoading(true);
     try {
+      // Use the messages endpoint with conversation_id as a query parameter
       const response = await fetch(
-        getApiUrl(`conversations/${conversationId}/messages/`),
+        getApiUrl(`messaging/messages/?conversation_id=${conversationId}`),
         {
           headers: {
             'Authorization': `Bearer ${token}`,
@@ -476,11 +497,25 @@ export const MessagingProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       );
 
       if (!response.ok) {
-        throw new Error('Failed to fetch messages');
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || 'Failed to fetch messages');
       }
 
       const data = await response.json();
-      setMessages(data);
+      
+      // Ensure messages are in the correct format
+      const formattedMessages = Array.isArray(data) ? data : (data.results || data.messages || []);
+      
+      setMessages(formattedMessages);
+
+      // Update the conversation with the fetched messages
+      setConversations(prevConversations => 
+        prevConversations.map(conv => 
+          conv.id === conversationId 
+            ? { ...conv, messages: formattedMessages }
+            : conv
+        )
+      );
 
       // Mark conversation as read when selected
       markConversationAsRead(conversationId);
@@ -567,8 +602,8 @@ export const MessagingProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           },
           body: JSON.stringify({ 
             content,
-            conversation: conversationId,  // This will be used by the backend to associate the message with the conversation
-            sender: user.id  // This will be set by the backend from the request.user
+            conversation: conversationId,
+            sender: user.id
           })
         });
         
@@ -578,6 +613,33 @@ export const MessagingProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           throw new Error(errorData.detail || 'Failed to send message');
         } else {
           console.log('Message sent successfully via HTTP');
+          
+          // Update the conversation's last_message in the conversations list
+          const newMessage = await response.json();
+          
+          setConversations(prevConversations => 
+            prevConversations.map(conv => 
+              conv.id === conversationId
+                ? {
+                    ...conv,
+                    last_message: {
+                      id: String(newMessage.id), // Ensure ID is string
+                      content: newMessage.content,
+                      sender: {
+                        id: String(user.id), // Convert user.id to string
+                        email: user.email,
+                        first_name: user.first_name,
+                        last_name: user.last_name || ''
+                      },
+                      timestamp: newMessage.timestamp || new Date().toISOString(),
+                      is_read: true
+                    },
+                    unread_count: 0,
+                    updated_at: new Date().toISOString()
+                  }
+                : conv
+            )
+          );
         }
       } catch (httpError) {
         console.error('Error sending message via HTTP:', httpError);
@@ -601,10 +663,22 @@ export const MessagingProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const conversation = conversations.find(c => c.id === conversationId);
     if (conversation) {
       setCurrentConversation(conversation);
+      
+      // First set the current conversation with existing messages (for immediate UI update)
       setMessages(conversation.messages || []);
+      
+      try {
+        // Then fetch the latest messages from the server
+        await fetchMessages(conversationId);
+      } catch (error) {
+        console.error('Error fetching messages:', error);
+        // Keep the existing messages if there's an error
+      }
+      
+      // Mark the conversation as read
       await markConversationAsRead(conversationId);
     }
-  }, [conversations, markConversationAsRead]);
+  }, [conversations, markConversationAsRead, fetchMessages]);
 
   // Create a new conversation
   const handleCreateConversation = useCallback(async (participantIds: string[], isGroup: boolean = false, name: string = '') => {

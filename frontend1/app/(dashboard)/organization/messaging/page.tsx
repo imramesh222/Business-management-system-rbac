@@ -287,60 +287,97 @@ export default function MessagingPage() {
         </div>
         
         <ScrollArea className="flex-1">
-          {conversations.map((conversation) => (
-            <div
-              key={conversation.id}
-              className={`p-4 border-b border-gray-100 hover:bg-gray-50 cursor-pointer ${
-                currentConversation?.id === conversation.id ? 'bg-blue-50' : ''
-              }`}
-              onClick={() => selectConversation(conversation.id)}
-            >
-              <div className="flex items-center">
-                <div className="relative">
-                  <Avatar className="h-10 w-10">
-                    <AvatarImage 
-                      src={conversation.participants[0]?.avatar} 
-                      alt={getDisplayName(conversation.participants[0])}
-                    />
-                    <AvatarFallback>
-                      {conversation.name 
-                        ? conversation.name.charAt(0).toUpperCase()
-                        : getInitials(conversation.participants[0] || { first_name: '', last_name: '' })
-                      }
-                    </AvatarFallback>
-                  </Avatar>
-                  {conversation.unread_count > 0 && (
-                    <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center">
-                      {conversation.unread_count}
-                    </span>
-                  )}
-                </div>
-                <div className="ml-3 flex-1 min-w-0">
-                  <div className="flex justify-between items-center">
-                    <h3 className="text-sm font-medium text-gray-900 truncate">
-                      {conversation.name || 
-                        conversation.participants
-                          .filter((p: any) => p.id !== user?.id)
-                          .map((p: any) => p.name)
-                          .join(', ')}
-                    </h3>
-                    {conversation.last_message && (
-                      <span className="text-xs text-gray-500">
-                        {formatDistanceToNow(new Date(conversation.last_message.timestamp))}
-                      </span>
-                    )}
-                  </div>
-                  {conversation.last_message && (
-                    <p className="text-sm text-gray-500 truncate">
-                      {conversation.last_message.sender.id === user?.id
-                        ? `You: ${conversation.last_message.content}`
-                        : `${getDisplayName(conversation.last_message.sender)}: ${conversation.last_message.content}`}
-                    </p>
-                  )}
-                </div>
-              </div>
+          {conversations.length === 0 ? (
+            <div className="p-4 text-center text-gray-500">
+              No conversations yet. Start a new chat!
             </div>
-          ))}
+          ) : (
+            conversations
+              .filter(conversation => {
+                if (!searchQuery.trim()) return true;
+                const query = searchQuery.toLowerCase();
+                
+                // Search in conversation name (for group chats)
+                if (conversation.name?.toLowerCase().includes(query)) return true;
+                
+                // Search in participant names (for direct messages)
+                if (!conversation.is_group) {
+                  const otherParticipants = conversation.participants.filter(p => p.id !== user?.id);
+                  return otherParticipants.some(participant => {
+                    const fullName = `${participant.first_name || ''} ${participant.last_name || ''}`.toLowerCase();
+                    return (
+                      fullName.includes(query) ||
+                      participant.email?.toLowerCase().includes(query)
+                    );
+                  });
+                }
+                
+                // Search in last message content
+                if (conversation.last_message?.content.toLowerCase().includes(query)) return true;
+                
+                return false;
+              })
+              .sort((a, b) => {
+                // Sort by last message timestamp or conversation creation time
+                const timeA = a.last_message?.timestamp || a.id;
+                const timeB = b.last_message?.timestamp || b.id;
+                return new Date(timeB).getTime() - new Date(timeA).getTime();
+              })
+              .map(conversation => (
+                <div
+                  key={conversation.id}
+                  onClick={() => selectConversation(conversation.id)}
+                  className={`p-4 hover:bg-gray-50 cursor-pointer border-b border-gray-100 ${
+                    currentConversation?.id === conversation.id ? 'bg-gray-100' : ''
+                  }`}
+                >
+                  <div className="flex items-center">
+                    <div className="relative">
+                      <Avatar className="h-12 w-12">
+                        <AvatarImage 
+                          src={conversation.participants[0]?.avatar} 
+                          alt={conversation.name || getDisplayName(conversation.participants[0])}
+                        />
+                        <AvatarFallback>
+                          {conversation.name 
+                            ? conversation.name.charAt(0).toUpperCase()
+                            : getInitials(conversation.participants[0] || { first_name: '', last_name: '' })
+                          }
+                        </AvatarFallback>
+                      </Avatar>
+                      {conversation.unread_count > 0 && (
+                        <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center">
+                          {conversation.unread_count}
+                        </span>
+                      )}
+                    </div>
+                    <div className="ml-3 flex-1 min-w-0">
+                      <div className="flex justify-between items-center">
+                        <h3 className="text-sm font-medium text-gray-900 truncate">
+                          {conversation.name || 
+                            conversation.participants
+                              .filter((p: any) => p.id !== user?.id)
+                              .map((p: any) => getDisplayName(p))
+                              .join(', ')}
+                        </h3>
+                        {conversation.last_message && (
+                          <span className="text-xs text-gray-500">
+                            {formatDistanceToNow(new Date(conversation.last_message.timestamp), { addSuffix: true })}
+                          </span>
+                        )}
+                      </div>
+                      {conversation.last_message && (
+                        <p className="text-sm text-gray-500 truncate">
+                          {conversation.last_message.sender.id === user?.id
+                            ? `You: ${conversation.last_message.content}`
+                            : `${getDisplayName(conversation.last_message.sender)}: ${conversation.last_message.content}`}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))
+          )}
         </ScrollArea>
       </div>
 
@@ -368,7 +405,7 @@ export default function MessagingPage() {
                     {currentConversation.name || 
                       currentConversation.participants
                         .filter((p: any) => p.id !== user?.id)
-                        .map((p: any) => p.name)
+                        .map((p: any) => getDisplayName(p))
                         .join(', ')}
                   </h3>
                   <p className="text-sm text-gray-500">

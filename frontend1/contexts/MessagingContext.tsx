@@ -54,7 +54,11 @@ interface MessagingContextType {
   createConversation: (participantIds: string[], isGroup?: boolean, name?: string) => Promise<Conversation | null>;
   markConversationAsRead: (conversationId: string) => void;
   fetchConversations: () => Promise<Conversation[]>;
+  fetchMessages: (conversationId: string) => Promise<void>;
   setConversations: React.Dispatch<React.SetStateAction<Conversation[]>>;
+  setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
+  setCurrentConversation: React.Dispatch<React.SetStateAction<Conversation | null>>;
+  setError: React.Dispatch<React.SetStateAction<string | null>>;
 }
 
 const MessagingContext = createContext<MessagingContextType | undefined>(undefined);
@@ -773,7 +777,11 @@ export const MessagingProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     createConversation: handleCreateConversation,
     markConversationAsRead,
     fetchConversations,
+    fetchMessages,
     setConversations,
+    setMessages,
+    setCurrentConversation,
+    setError,
   };
 
   return (
@@ -783,7 +791,7 @@ export const MessagingProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   );
 };
 
-export const useMessaging = (): MessagingContextType => {
+export const useMessaging = (): MessagingContextType & { fetchMessages: any } => {
   const context = useContext(MessagingContext);
   if (context === undefined) {
     throw new Error('useMessaging must be used within a MessagingProvider');

@@ -2,6 +2,7 @@
 
 import { useAuth } from '@/contexts/AuthContext';
 import { useMessaging } from '@/contexts/MessagingContext';
+import { deleteMessage } from '@/services/messagingService';
 import { useCallback, useEffect, useRef, useState, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -10,7 +11,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { formatDistanceToNow } from 'date-fns';
-import { Search, Send, Users, Plus, MessageSquare, X } from 'lucide-react';
+import { Search, Send, Users, Plus, MessageSquare, X, Trash2, Paperclip } from 'lucide-react';
 
 // Define the user type to match your AuthContext
 interface User {
@@ -52,7 +53,8 @@ interface Conversation {
 }
 
 export default function MessagingPage() {
-  const { user } = useAuth();
+  const { user, token } = useAuth();
+  const [isDeleting, setIsDeleting] = useState(false);
   const {
     conversations,
     currentConversation,
@@ -65,6 +67,10 @@ export default function MessagingPage() {
     createConversation,
     fetchConversations,
     setConversations,
+    setMessages,
+    setCurrentConversation,
+    setError,
+    fetchMessages,
   } = useMessaging();
   
   const [isLoading, setIsLoading] = useState(false);
@@ -176,21 +182,81 @@ export default function MessagingPage() {
     });
   }, [searchInput, availableUsers]);
 
-
   // Auto-scroll to bottom of messages
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const handleSendMessage = async (e: React.FormEvent) => {
+  const handleSendMessage = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newMessage.trim() || !currentConversation) return;
-    
-    const success = await sendMessage(newMessage, currentConversation.id);
-    if (success) {
+
+    try {
+      await sendMessage(currentConversation.id, newMessage);
       setNewMessage('');
+    } catch (error) {
+      console.error('Error sending message:', error);
+      setErrorMessage('Failed to send message');
     }
-  };
+  }, [newMessage, currentConversation, sendMessage]);
+
+  const handleDeleteMessage = useCallback(async (messageId: string) => {
+    if (!window.confirm('Are you sure you want to delete this message?')) return;
+    
+    if (!token) {
+      setErrorMessage('Authentication token is missing');
+      return;
+    }
+    
+    try {
+      // Optimistically update the UI
+      setMessages(prev => prev.filter(msg => msg.id !== messageId));
+      
+      // Call the API to delete the message
+      await deleteMessage(messageId, token);
+      
+      // If there's a current conversation, update its last message if needed
+      if (currentConversation?.last_message?.id === messageId) {
+        const remainingMessages = messages.filter(msg => msg.id !== messageId);
+        const newLastMessage = remainingMessages[remainingMessages.length - 1];
+        
+        setCurrentConversation(prev => {
+          if (!prev) return null;
+          return {
+            ...prev,
+            last_message: newLastMessage,
+          };
+        });
+      }
+    } catch (error) {
+      console.error('Error deleting message:', error);
+      setErrorMessage('Failed to delete message');
+      // Re-fetch messages to restore the correct state
+      if (currentConversation) {
+        fetchMessages(currentConversation.id);
+      }
+    }
+  }, [setMessages, setErrorMessage, token, currentConversation, messages, setCurrentConversation, fetchMessages]);
+
+  const handleDeleteConversation = useCallback(async (conversationId: string) => {
+    if (!window.confirm('Are you sure you want to delete this conversation? This action cannot be undone.')) return;
+    
+    try {
+      setIsDeleting(true);
+      // Call your API to delete the conversation
+      // await deleteConversation(conversationId);
+      // Update the local state to remove the conversation
+      setConversations(prev => prev.filter(conv => conv.id !== conversationId));
+      if (currentConversation?.id === conversationId) {
+        setCurrentConversation(null);
+      }
+    } catch (error) {
+      console.error('Error deleting conversation:', error);
+      setErrorMessage('Failed to delete conversation');
+    } finally {
+      setIsDeleting(false);
+    }
+  }, [currentConversation?.id]);
 
   const handleCreateGroup = async () => {
     if (selectedUsers.length === 0) return;
@@ -386,7 +452,7 @@ export default function MessagingPage() {
         {currentConversation ? (
           <>
             {/* Chat header */}
-            <div className="p-4 border-b border-gray-200 flex items-center">
+            <div className="p-4 border-b border-gray-200 flex items-center justify-between bg-white/80 backdrop-blur-sm sticky top-0 z-10">
               <div className="flex items-center">
                 <Avatar className="h-10 w-10">
                   <AvatarImage 
@@ -401,57 +467,115 @@ export default function MessagingPage() {
                   </AvatarFallback>
                 </Avatar>
                 <div className="ml-3">
-                  <h3 className="text-lg font-medium text-gray-900">
-                    {currentConversation.name || 
-                      currentConversation.participants
-                        .filter((p: any) => p.id !== user?.id)
-                        .map((p: any) => getDisplayName(p))
-                        .join(', ')}
-                  </h3>
+                  <div className="flex items-center space-x-2">
+                    <h3 className="text-lg font-medium text-gray-900">
+                      {currentConversation.name || 
+                        currentConversation.participants
+                          .filter((p: any) => p.id !== user?.id)
+                          .map((p: any) => getDisplayName(p))
+                          .join(', ')}
+                    </h3>
+                    {currentConversation.is_group && (
+                      <span className="text-xs bg-gray-100 px-2 py-0.5 rounded-full text-gray-600">
+                        Group
+                      </span>
+                    )}
+                  </div>
                   <p className="text-sm text-gray-500">
                     {currentConversation.participants.length} participant
                     {currentConversation.participants.length !== 1 ? 's' : ''}
                   </p>
                 </div>
               </div>
+              <div className="flex items-center space-x-2">
+                <button 
+                  onClick={() => handleDeleteConversation(currentConversation.id)}
+                  className="p-2 text-gray-500 hover:text-red-500 transition-colors"
+                  title="Delete conversation"
+                >
+                  <Trash2 className="h-5 w-5" />
+                </button>
+              </div>
             </div>
 
             {/* Messages */}
-            <ScrollArea className="flex-1 p-4 space-y-4">
-              {messages.map((message) => (
-                <div
-                  key={message.id}
-                  className={`flex ${message.sender.id === user?.id ? 'justify-end' : 'justify-start'}`}
-                >
-                  <div
-                    className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${
-                      message.sender.id === user?.id
-                        ? 'bg-primary text-primary-foreground'
-                        : 'bg-gray-100 text-gray-900'
-                    }`}
-                  >
-                    <div className="text-sm">{message.content}</div>
-                    <div className={`text-xs mt-1 ${
-                      message.sender.id === user?.id ? 'text-primary-foreground/70' : 'text-gray-500'
-                    }`}>
-                      {message.timestamp}
+            <div className="flex-1 overflow-hidden flex flex-col">
+              <ScrollArea className="flex-1 p-4">
+                <div className="space-y-2">
+                  {messages.map((message) => (
+                    <div
+                      key={message.id}
+                      className={`flex ${message.sender.id === user?.id ? 'justify-end' : 'justify-start'}`}
+                    >
+                      <div className="relative group">
+                        <div
+                          className={`relative max-w-xs lg:max-w-md px-4 py-2 rounded-2xl ${
+                            message.sender.id === user?.id
+                              ? 'bg-primary text-primary-foreground rounded-tr-none'
+                              : 'bg-gray-100 text-gray-900 rounded-tl-none'
+                          }`}
+                        >
+                          <div className="text-sm break-words">{message.content}</div>
+                          <div className={`flex items-center justify-end mt-1 space-x-1 text-xs ${
+                            message.sender.id === user?.id ? 'text-primary-foreground/70' : 'text-gray-500'
+                          }`}>
+                            <span>{formatDistanceToNow(new Date(message.timestamp), { addSuffix: true })}</span>
+                            {message.sender.id === user?.id && (
+                              <span className="ml-1">
+                                {message.is_read ? '✓✓' : '✓'}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        {message.sender.id === user?.id && (
+                          <button 
+                            onClick={() => handleDeleteMessage(message.id)}
+                            className="absolute -left-2 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity bg-red-500 text-white rounded-full p-1 hover:bg-red-600"
+                            title="Delete message"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        )}
+                      </div>
                     </div>
-                  </div>
+                  ))}
+                  <div ref={messagesEndRef} />
                 </div>
-              ))}
-              <div ref={messagesEndRef} />
-            </ScrollArea>
+              </ScrollArea>
+            </div>
 
             {/* Message input */}
-            <div className="p-4 border-t border-gray-200">
+            <div className="p-4 border-t border-gray-200 bg-white/80 backdrop-blur-sm">
               <form onSubmit={handleSendMessage} className="flex space-x-2">
-                <Input
-                  placeholder="Type a message..."
-                  className="flex-1"
-                  value={newMessage}
-                  onChange={(e) => setNewMessage(e.target.value)}
-                />
-                <Button type="submit" size="icon">
+                <div className="relative flex-1">
+                  <Input
+                    placeholder="Type a message..."
+                    className="pr-12 rounded-full bg-gray-50 border-gray-200 focus-visible:ring-2 focus-visible:ring-primary/20"
+                    value={newMessage}
+                    onChange={(e) => setNewMessage(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        handleSendMessage(e);
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-gray-400 hover:text-primary rounded-full hover:bg-gray-100"
+                    onClick={() => {
+                      // Handle attachment click
+                    }}
+                  >
+                    <Paperclip className="h-5 w-5" />
+                  </button>
+                </div>
+                <Button 
+                  type="submit" 
+                  size="icon" 
+                  className="rounded-full h-10 w-10"
+                  disabled={!newMessage.trim()}
+                >
                   <Send className="h-4 w-4" />
                 </Button>
               </form>

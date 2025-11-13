@@ -2,9 +2,10 @@
 
 import './globals.css';
 import { Inter } from 'next/font/google';
-import { ToastProvider, Toaster } from '@/hooks/use-toast';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider } from '@/contexts/AuthContext';
+import { MessagingProvider } from '@/contexts/MessagingContext';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { ToastProvider, Toaster } from '@/hooks/use-toast';
 
 // Create a client
 const queryClient = new QueryClient();
@@ -25,10 +26,12 @@ export default function RootLayout({
       <body className={inter.className}>
         <QueryClientProvider client={queryClient}>
           <AuthProvider>
-            <ToastProvider>
-              {children}
-              <Toaster />
-            </ToastProvider>
+            <MessagingProvider>
+              <ToastProvider>
+                {children}
+                <Toaster />
+              </ToastProvider>
+            </MessagingProvider>
           </AuthProvider>
         </QueryClientProvider>
       </body>

@@ -21,7 +21,8 @@ import {
   UserCheck,
   Headphones,
   DollarSign,
-  Code
+  Code,
+  MessageSquare
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getCurrentUserWithFallback, UserRole, getRoleDisplayName } from '@/lib/auth';

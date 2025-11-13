@@ -28,6 +28,8 @@ export interface JwtPayload {
 }
 
 export interface User {
+  last_name: string;
+  first_name: string;
   id: string | number;
   name: string;
   email: string;

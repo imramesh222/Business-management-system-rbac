@@ -7,6 +7,7 @@ import { getCurrentUserWithFallback, User, isAuthenticated as checkAuth } from '
 interface AuthContextType {
   user: User | null;
   loading: boolean;
+  token: string | null;
   login: (userData: User) => void;
   logout: () => void;
   isAuthenticated: () => boolean;
@@ -16,6 +17,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
+  const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
 
@@ -38,12 +40,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = (userData: User) => {
     setUser(userData);
+    if (typeof window !== 'undefined') {
+      setToken(localStorage.getItem('access_token'));
+    }
   };
 
   const logout = () => {
     // Clear tokens from storage
-    localStorage.removeItem('access_token');
-    localStorage.removeItem('refresh_token');
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('access_token');
+      localStorage.removeItem('refresh_token');
+    }
     setUser(null);
     router.push('/login');
   };
@@ -52,8 +59,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return checkAuth();
   };
 
+  // Get token safely
+  const getToken = () => {
+    if (typeof window === 'undefined') return null;
+    return localStorage.getItem('access_token');
+  };
+
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout, isAuthenticated }}>
+    <AuthContext.Provider value={{
+      user,
+      loading,
+      token: getToken(),
+      login,
+      logout,
+      isAuthenticated: checkAuth,
+    }}>
       {children}
     </AuthContext.Provider>
   );

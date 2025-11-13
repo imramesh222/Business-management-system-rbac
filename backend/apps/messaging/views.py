@@ -1,10 +1,12 @@
-from rest_framework import viewsets, status, mixins
+from rest_framework import serializers, viewsets, status, mixins
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.pagination import PageNumberPagination
+from django.db import transaction
 from django.db.models import Q, Count, Case, When, Value, BooleanField
 from django.db.models.functions import Coalesce
+import logging
 
 from .models import Conversation, Message
 from .serializers import (
@@ -22,6 +24,8 @@ class StandardResultsSetPagination(PageNumberPagination):
     page_size_query_param = 'page_size'
     max_page_size = 100
 
+# In backend/apps/messaging/views.py
+
 class ConversationViewSet(viewsets.GenericViewSet, 
                          mixins.ListModelMixin,
                          mixins.RetrieveModelMixin,
@@ -31,6 +35,8 @@ class ConversationViewSet(viewsets.GenericViewSet,
     """
     permission_classes = [IsAuthenticated]
     pagination_class = StandardResultsSetPagination
+    http_method_names = ['get', 'post', 'head', 'options', 'patch']
+    
     
     def get_queryset(self):
         """
@@ -64,91 +70,112 @@ class ConversationViewSet(viewsets.GenericViewSet,
     
     def create(self, request, *args, **kwargs):
         """Create a new conversation"""
-        serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        logger = logging.getLogger(__name__)
+        logger.info(f"Creating new conversation with data: {request.data}")
         
-        # Get participants from the request
-        participant_ids = serializer.validated_data.get('participant_ids', [])
-        is_group = serializer.validated_data.get('is_group', False)
-        name = serializer.validated_data.get('name', '')
-        
-        # Get user objects for participants
-        participants = User.objects.filter(id__in=participant_ids)
-        if not participants.exists():
+        try:
+            # Log the incoming request data
+            logger.debug(f"Request user: {request.user}")
+            logger.debug(f"Request data: {request.data}")
+            
+            # Initialize serializer with request context
+            serializer = self.get_serializer(data=request.data, context={'request': request})
+            
+            # Validate the data
+            try:
+                serializer.is_valid(raise_exception=True)
+            except serializers.ValidationError as ve:
+                logger.warning(f"Validation error: {str(ve)}")
+                raise
+                
+            # Start transaction
+            with transaction.atomic():
+                try:
+                    # Save the conversation
+                    conversation = serializer.save()
+                    logger.info(f"Successfully created conversation {conversation.id}")
+                    
+                    # Get the full conversation data with participants
+                    response_serializer = ConversationSerializer(
+                        conversation, 
+                        context={'request': request}
+                    )
+                    
+                    # Prepare response
+                    headers = self.get_success_headers(serializer.data)
+                    return Response(
+                        response_serializer.data,
+                        status=status.HTTP_201_CREATED,
+                        headers=headers
+                    )
+                    
+                except Exception as e:
+                    logger.error(f"Error in transaction: {str(e)}", exc_info=True)
+                    raise
+                    
+        except serializers.ValidationError as ve:
+            # Re-raise validation errors with details
+            logger.warning(f"Validation error: {str(ve)}")
             return Response(
-                {"detail": "No valid participants provided"}, 
+                {"detail": str(ve)},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
-        # Create conversation
-        conversation = Conversation.objects.create(
-            is_group=is_group,
-            name=name if is_group and name else None
-        )
-        
-        # Add participants (including the current user)
-        conversation.participants.add(request.user, *participants)
-        
-        # Return the created conversation
-        response_serializer = ConversationSerializer(conversation, context={'request': request})
-        return Response(response_serializer.data, status=status.HTTP_201_CREATED)
-    
-    @action(detail=True, methods=['get'])
-    def messages(self, request, pk=None):
-        """List messages in a conversation"""
-        conversation = self.get_object()
-        
-        # Mark unread messages as read
-        Message.objects.filter(
-            conversation=conversation,
-            is_read=False
-        ).exclude(
-            sender=request.user
-        ).update(is_read=True)
-        
-        # Get paginated messages
-        messages = conversation.messages.all().order_by('timestamp')
-        page = self.paginate_queryset(messages)
-        
-        if page is not None:
-            serializer = MessageSerializer(page, many=True)
-            return self.get_paginated_response(serializer.data)
             
-        serializer = MessageSerializer(messages, many=True)
-        return Response(serializer.data)
+        except Exception as e:
+            # Log the full error with traceback
+            logger.error(
+                f"Unexpected error in conversation creation: {str(e)}", 
+                exc_info=True
+            )
+            # Return a more detailed error message in development
+            error_detail = str(e)
+            return Response(
+                {
+                    "detail": "An error occurred while creating the conversation",
+                    "error": error_detail
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
     
-    @action(detail=True, methods=['post'])
+    @action(detail=True, methods=['post'], url_path='mark_as_read', url_name='mark_as_read')
     def mark_as_read(self, request, pk=None):
-        """Mark all messages in a conversation as read"""
-        conversation = self.get_object()
-        updated = conversation.messages.filter(
-            is_read=False
-        ).exclude(
-            sender=request.user
-        ).update(is_read=True)
+        """Mark all messages in a conversation as read for the current user"""
+        logger = logging.getLogger(__name__)
+        logger.info(f"[DEBUG] mark_as_read called with pk={pk}, method={request.method}")
+        logger.info(f"[DEBUG] Request data: {request.data}")
+        logger.info(f"[DEBUG] Request path: {request.path}")
         
-        return Response({
-            'status': 'success',
-            'updated_count': updated
-        })
-    
-    @action(detail=False, methods=['get'])
-    def search_users(self, request):
-        """Search for users to start a conversation"""
-        query = request.query_params.get('q', '').strip()
-        
-        if not query:
-            return Response([])
+        try:
+            # Get the conversation
+            logger.info(f"[DEBUG] Getting conversation with pk={pk}")
+            conversation = self.get_object()
+            logger.info(f"[DEBUG] Found conversation: {conversation.id}")
             
-        users = User.objects.filter(
-            Q(email__icontains=query) |
-            Q(first_name__icontains=query) |
-            Q(last_name__icontains=query)
-        ).exclude(id=request.user.id)[:10]
-        
-        serializer = UserSerializer(users, many=True)
-        return Response(serializer.data)
-
+            # Mark all unread messages in this conversation as read
+            logger.info("[DEBUG] Updating unread messages...")
+            updated = Message.objects.filter(
+                conversation=conversation,
+                is_read=False
+            ).exclude(
+                sender=request.user
+            ).update(is_read=True)
+            
+            logger.info(f"[DEBUG] Marked {updated} messages as read in conversation {pk}")
+            
+            # Return the updated conversation
+            serializer = self.get_serializer(conversation)
+            logger.info("[DEBUG] Returning success response")
+            return Response(serializer.data)
+            
+        except Exception as e:
+            logger.error(
+                f"[ERROR] Error marking messages as read: {str(e)}",
+                exc_info=True
+            )
+            return Response(
+                {"detail": f"Error marking messages as read: {str(e)}"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
 class MessageViewSet(viewsets.GenericViewSet,
                     mixins.CreateModelMixin,
@@ -166,9 +193,16 @@ class MessageViewSet(viewsets.GenericViewSet,
     
     def perform_create(self, serializer):
         """Save the message and update conversation timestamp"""
+        # The conversation is already validated by the serializer
         message = serializer.save(sender=self.request.user)
         # Update conversation's updated_at
         message.conversation.save(update_fields=['updated_at'])
+        
+    def get_serializer_context(self):
+        """Add request to serializer context"""
+        context = super().get_serializer_context()
+        context['request'] = self.request
+        return context
     
     @action(detail=True, methods=['post'])
     def read(self, request, pk=None):

@@ -5,7 +5,7 @@ import logging
 from datetime import datetime
 
 def setup_django():
-    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'core.settings')
+    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'backend.settings')
     import django
     django.setup()
     return django

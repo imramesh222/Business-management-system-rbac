@@ -14,11 +14,16 @@ class UserSerializer(serializers.ModelSerializer):
 class MessageSerializer(serializers.ModelSerializer):
     """Serializer for messages"""
     sender = UserSerializer(read_only=True)
+    conversation = serializers.PrimaryKeyRelatedField(queryset=Conversation.objects.all(), write_only=True)
     
     class Meta:
         model = Message
-        fields = ['id', 'sender', 'content', 'timestamp', 'is_read']
+        fields = ['id', 'sender', 'content', 'timestamp', 'is_read', 'conversation']
         read_only_fields = ['sender', 'timestamp', 'is_read']
+    
+    def create(self, validated_data):
+        # The conversation is already included in validated_data from the PrimaryKeyRelatedField
+        return super().create(validated_data)
 
 class ConversationSerializer(serializers.ModelSerializer):
     """Serializer for conversations"""
@@ -43,13 +48,81 @@ class ConversationSerializer(serializers.ModelSerializer):
             return obj.messages.filter(is_read=False).exclude(sender=request.user).count()
         return 0
 
+import logging
+import uuid
+from django.db import transaction
+
+logger = logging.getLogger(__name__)
+
+
 class CreateConversationSerializer(serializers.ModelSerializer):
     """Serializer for creating a new conversation"""
     participant_ids = serializers.ListField(
-        child=serializers.IntegerField(),
+        child=serializers.UUIDField(),
         write_only=True,
         required=True
     )
+    
+    def validate_participant_ids(self, value):
+        """
+        Validate that all participant IDs exist and belong to the same organization as the current user.
+        Returns list of user IDs.
+        """
+        try:
+            request = self.context.get('request')
+            if not request or not request.user.is_authenticated:
+                raise serializers.ValidationError("Authentication required")
+                
+            current_user = request.user
+            logger.info(f"Validating participant IDs for user {current_user.id}: {value}")
+            
+            # Convert and validate UUIDs
+            from uuid import UUID
+            user_ids = []
+            
+            for user_id in value:
+                try:
+                    # Convert to string and validate UUID format
+                    user_uuid = str(UUID(str(user_id)))
+                    user_ids.append(user_uuid)
+                except (ValueError, TypeError, AttributeError) as e:
+                    logger.error(f"Invalid user ID format: {user_id}")
+                    raise serializers.ValidationError(f"Invalid user ID format: {user_id}")
+            
+            # Convert string UUIDs to UUID objects if needed
+            try:
+                user_uuids = [
+                    uuid.UUID(str(user_id)) if isinstance(user_id, str) else user_id 
+                    for user_id in user_ids
+                ]
+            except (ValueError, AttributeError, TypeError) as e:
+                logger.error(f"Invalid user ID format: {e}")
+                raise serializers.ValidationError("Invalid user ID format")
+            
+            # Verify all users exist
+            existing_users = set(
+                User.objects.filter(id__in=user_uuids)
+                .values_list('id', flat=True)
+            )
+            
+            # Find users who don't exist
+            invalid_users = [
+                str(user_id) for user_id in user_uuids 
+                if user_id not in existing_users
+            ]
+            
+            if invalid_users:
+                logger.error(f"Users not found: {invalid_users}")
+                raise serializers.ValidationError(
+                    f"Users not found: {', '.join(str(u) for u in sorted(invalid_users))}"
+                )
+            
+            logger.info(f"Validated {len(user_uuids)} users for conversation")
+            return user_uuids
+                
+        except Exception as e:
+            logger.error(f"Error validating participant IDs: {str(e)}", exc_info=True)
+            raise serializers.ValidationError(f"Error validating users: {str(e)}")
     
     class Meta:
         model = Conversation
@@ -60,25 +133,61 @@ class CreateConversationSerializer(serializers.ModelSerializer):
         }
     
     def create(self, validated_data):
-        participant_ids = validated_data.pop('participant_ids', [])
-        is_group = validated_data.pop('is_group', len(participant_ids) > 1)
+        logger.info(f"Creating conversation with validated data: {validated_data}")
         
-        # If it's a group conversation, name is required
-        if is_group and not validated_data.get('name'):
-            validated_data['name'] = f"Group {Conversation.objects.count() + 1}"
-        
-        conversation = Conversation.objects.create(
-            is_group=is_group,
-            **validated_data
-        )
-        
-        # Add participants
-        participants = User.objects.filter(id__in=participant_ids)
-        conversation.participants.add(*participants)
-        
-        # Add the current user if not in participants
-        request = self.context.get('request')
-        if request and request.user.is_authenticated and request.user not in participants:
-            conversation.participants.add(request.user)
-        
-        return conversation
+        try:
+            participant_ids = validated_data.pop('participant_ids', [])
+            is_group = validated_data.get('is_group', len(participant_ids) > 1)
+            request = self.context.get('request')
+            current_user = request.user if request and hasattr(request, 'user') else None
+            
+            if not current_user:
+                raise serializers.ValidationError("Authentication required")
+                
+            logger.info(f"Processing conversation creation with participant IDs: {participant_ids}, is_group: {is_group}")
+            
+            # If it's a group conversation, generate a name if not provided
+            if is_group and not validated_data.get('name'):
+                participant_users = User.objects.filter(id__in=participant_ids)
+                participant_names = list(participant_users.values_list('first_name', flat=True)[:3])
+                name = ", ".join(participant_names)
+                if len(participant_ids) > 3:
+                    name += f" and {len(participant_ids) - 3} others"
+                validated_data['name'] = name
+                logger.info(f"Generated group name: {validated_data['name']}")
+            
+            # Create the conversation in a transaction
+            with transaction.atomic():
+                try:
+                    # Create the conversation
+                    conversation = Conversation.objects.create(
+                        name=validated_data.get('name'),
+                        is_group=is_group
+                    )
+                    
+                    # Add participants (including current user)
+                    all_participant_ids = list(set(participant_ids + [current_user.id]))
+                    participants = User.objects.filter(id__in=all_participant_ids)
+                    conversation.participants.add(*participants)
+                    
+                    # Set current user as admin for group conversations
+                    if is_group:
+                        from .models import ConversationParticipant
+                        ConversationParticipant.objects.filter(
+                            conversation=conversation,
+                            user=current_user
+                        ).update(is_admin=True)
+                    
+                    logger.info(f"Successfully created conversation {conversation.id} with {participants.count()} participants")
+                    return conversation
+                    
+                except Exception as e:
+                    logger.error(f"Error in conversation creation transaction: {str(e)}", exc_info=True)
+                    raise serializers.ValidationError(f"Failed to create conversation: {str(e)}")
+                    
+        except serializers.ValidationError:
+            raise  # Re-raise validation errors
+            
+        except Exception as e:
+            logger.error(f"Unexpected error in conversation creation: {str(e)}", exc_info=True)
+            raise serializers.ValidationError("An unexpected error occurred while creating the conversation")

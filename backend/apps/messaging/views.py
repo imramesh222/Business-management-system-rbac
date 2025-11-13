@@ -29,13 +29,14 @@ class StandardResultsSetPagination(PageNumberPagination):
 class ConversationViewSet(viewsets.GenericViewSet, 
                          mixins.ListModelMixin,
                          mixins.RetrieveModelMixin,
-                         mixins.CreateModelMixin):
+                         mixins.CreateModelMixin,
+                         mixins.DestroyModelMixin):
     """
     ViewSet for managing conversations
     """
     permission_classes = [IsAuthenticated]
     pagination_class = StandardResultsSetPagination
-    http_method_names = ['get', 'post', 'head', 'options', 'patch']
+    http_method_names = ['get', 'post', 'head', 'options', 'patch', 'delete']
     
     
     def get_queryset(self):

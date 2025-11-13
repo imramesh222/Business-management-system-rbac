@@ -2,7 +2,7 @@
 
 import { useAuth } from '@/contexts/AuthContext';
 import { useMessaging } from '@/contexts/MessagingContext';
-import { deleteMessage } from '@/services/messagingService';
+import { deleteMessage, deleteConversation } from '@/services/messagingService';
 import { useCallback, useEffect, useRef, useState, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -241,18 +241,35 @@ export default function MessagingPage() {
   const handleDeleteConversation = useCallback(async (conversationId: string) => {
     if (!window.confirm('Are you sure you want to delete this conversation? This action cannot be undone.')) return;
     
+    if (!token) {
+      setErrorMessage('Authentication token is missing');
+      return;
+    }
+    
     try {
       setIsDeleting(true);
-      // Call your API to delete the conversation
-      // await deleteConversation(conversationId);
+      
+      // Call the API to delete the conversation
+      await deleteConversation(conversationId, token);
+      
       // Update the local state to remove the conversation
       setConversations(prev => prev.filter(conv => conv.id !== conversationId));
+      
+      // Clear the current conversation if it's the one being deleted
       if (currentConversation?.id === conversationId) {
         setCurrentConversation(null);
+        setMessages([]);
       }
     } catch (error) {
       console.error('Error deleting conversation:', error);
       setErrorMessage('Failed to delete conversation');
+      
+      // Re-fetch conversations to restore the correct state
+      try {
+        await fetchConversations();
+      } catch (e) {
+        console.error('Error refreshing conversations:', e);
+      }
     } finally {
       setIsDeleting(false);
     }
@@ -423,7 +440,14 @@ export default function MessagingPage() {
                           {conversation.name || 
                             conversation.participants
                               .filter((p: any) => p.id !== user?.id)
-                              .map((p: any) => getDisplayName(p))
+                              .map((p: any) => {
+                                // Fallback to email if name fields are empty
+                                if (!p.first_name && !p.last_name) {
+                                  return p.email || 'Unknown User';
+                                }
+                                return `${p.first_name || ''} ${p.last_name || ''}`.trim();
+                              })
+                              .filter(Boolean) // Remove any empty strings
                               .join(', ')}
                         </h3>
                         {conversation.last_message && (
@@ -472,7 +496,14 @@ export default function MessagingPage() {
                       {currentConversation.name || 
                         currentConversation.participants
                           .filter((p: any) => p.id !== user?.id)
-                          .map((p: any) => getDisplayName(p))
+                          .map((p: any) => {
+                            // Fallback to email if name fields are empty
+                            if (!p.first_name && !p.last_name) {
+                              return p.email || 'Unknown User';
+                            }
+                            return `${p.first_name || ''} ${p.last_name || ''}`.trim();
+                          })
+                          .filter(Boolean) // Remove any empty strings
                           .join(', ')}
                     </h3>
                     {currentConversation.is_group && (

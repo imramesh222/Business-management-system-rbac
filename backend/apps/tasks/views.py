@@ -9,6 +9,7 @@ from apps.users.permissions import IsAdmin, IsOrganizationMember
 from apps.organization.models import OrganizationRoleChoices
 
 class TaskViewSet(viewsets.ModelViewSet):
+    permission_classes = [permissions.IsAuthenticated]
     """
     ViewSet for managing tasks.
     - Project managers can create, update, and view all tasks

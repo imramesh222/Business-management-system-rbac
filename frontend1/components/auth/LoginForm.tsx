@@ -134,9 +134,9 @@ const LoginForm = () => {
           'organization': '/organization/dashboard',
           
           // Project Manager
-          'project_manager': '/organization/project-manager/dashboard',
-          'projectmanager': '/organization/project-manager/dashboard',
-          'pmanager': '/organization/project-manager/dashboard',
+          'project_manager': '/organization/overview',
+          'projectmanager': '/organization/overview',
+          'pmanager': '/organization/overview',
           
           // Developer
           'developer': '/organization/developer/dashboard',

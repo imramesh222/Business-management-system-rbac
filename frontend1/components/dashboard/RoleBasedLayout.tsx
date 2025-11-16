@@ -119,7 +119,7 @@ const getNavigationForRole = (role: UserRole) => {
     ],
     // Default navigation for regular users
     user: [
-      { name: 'My Dashboard', href: '/organization/user/dashboard', icon: Home, current: true },
+      // { name: 'My Dashboard', href: '/organization/user/dashboard', icon: Home, current: true },
       { name: 'My Tasks', href: '/organization/user/tasks', icon: CheckSquare, current: false },
       { name: 'Projects', href: '/organization/user/projects', icon: FolderOpen, current: false },
       { name: 'Calendar', href: '/organization/user/calendar', icon: Calendar, current: false },

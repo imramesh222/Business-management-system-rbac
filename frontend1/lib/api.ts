@@ -1,11 +1,12 @@
+import { API_URL } from '@/constant';
+
 /**
- * Get the base URL for API requests
- * Uses NEXT_PUBLIC_API_URL from environment variables with a fallback to localhost:8000
+ * Get the full URL for API requests
+ * Uses the API_URL constant from the constants file
  */
 export function getApiUrl(path: string = ''): string {
-  const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
   // Remove any trailing slashes from the base URL and leading slashes from the path
-  return `${baseUrl.replace(/\/+$/, '')}/${path.replace(/^\/+/, '')}`;
+  return `${API_URL.replace(/\/+$/, '')}/${path.replace(/^\/+/, '')}`;
 }
 
 /**

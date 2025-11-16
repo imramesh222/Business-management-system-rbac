@@ -1,9 +1,10 @@
 'use client';
 
 import { ReactNode, useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import { getCurrentUser, isAuthenticated } from '@/lib/auth';
 import { Sidebar } from '@/components/sidebar';
+import { ProfileContent } from '@/components/profile/ProfileContent';
 
 export default function OrganizationLayout({
   children,
@@ -11,10 +12,9 @@ export default function OrganizationLayout({
   children: ReactNode;
 }) {
   const router = useRouter();
+  const pathname = usePathname();
   const [isClient, setIsClient] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
-  
-  // Get user on client-side only
   const [user, setUser] = useState<any>(null);
   
   useEffect(() => {
@@ -33,6 +33,13 @@ export default function OrganizationLayout({
     setIsLoading(false);
   }, [router]);
 
+  // Redirect to overview if at the root organization path
+  useEffect(() => {
+    if (isClient && !isLoading && pathname === '/organization') {
+      router.push('/organization/overview');
+    }
+  }, [isClient, isLoading, router, pathname]);
+
   // Show loading state while checking authentication
   if (!isClient || isLoading) {
     return (
@@ -42,36 +49,20 @@ export default function OrganizationLayout({
     );
   }
 
-  // Get organization name safely
-  const getOrganizationName = () => {
-    if (!user?.organization) return 'Organization';
-    if (typeof user.organization === 'string') return user.organization;
-    return (user.organization as any)?.name || 'Organization';
-  };
+  // Check if we're on the profile page
+  const isProfilePage = pathname === '/profile';
 
   return (
     <div className="flex h-screen overflow-hidden">
-      {/* Sidebar - Only render when we have user data */}
-      {user && <Sidebar user={user} />}
-
-      {/* Main Content */}
+      <Sidebar user={user} />
       <div className="flex-1 overflow-auto">
-        {/* Top Navigation */}
-        <header className="bg-white shadow-sm">
-          <div className="max-w-7xl mx-auto px-4 py-4 sm:px-6 lg:px-8 flex justify-between items-center">
-            <h1 className="text-xl font-semibold text-gray-900">
-              {getOrganizationName()}
-            </h1>
-            <div className="flex items-center space-x-4">
-              {/* Add any header actions here */}
-            </div>
-          </div>
-        </header>
-
-        {/* Page Content */}
-        <main className="flex-1 p-6">
-          {children}
-        </main>
+        {isProfilePage ? (
+          <ProfileContent />
+        ) : (
+          <main className="p-6">
+            {children}
+          </main>
+        )}
       </div>
     </div>
   );

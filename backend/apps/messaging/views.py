@@ -7,6 +7,7 @@ from django.db import transaction
 from django.db.models import Q, Count, Case, When, Value, BooleanField
 from django.db.models.functions import Coalesce
 import logging
+from django.utils import timezone
 
 from .models import Conversation, Message
 from .serializers import (
@@ -221,22 +222,75 @@ class MessageViewSet(viewsets.GenericViewSet,
             
         serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data)
+    
+    def create(self, request, *args, **kwargs):
+        """Create a new message with proper error handling and logging"""
+        logger = logging.getLogger(__name__)
+        logger.info(f"Creating new message with data: {request.data}")
         
-    def get_queryset(self):
-        queryset = Message.objects.filter(
-            conversation__participants=self.request.user
-        ).select_related('sender', 'conversation')
-        
-        # Filter by conversation_id if provided in query params
-        conversation_id = self.request.query_params.get('conversation_id')
-        if conversation_id:
-            queryset = queryset.filter(conversation_id=conversation_id)
+        try:
+            # Get the conversation ID from the request data
+            conversation_id = request.data.get('conversation')
+            if not conversation_id:
+                return Response(
+                    {"detail": "conversation is required"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
             
-        return queryset.order_by('-timestamp')
+            # Convert conversation_id to int if it's a string
+            try:
+                conversation_id = int(conversation_id)
+            except (ValueError, TypeError):
+                return Response(
+                    {"detail": "Invalid conversation ID. Must be a number."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Check if the conversation exists and the user is a participant
+            try:
+                conversation = Conversation.objects.get(
+                    id=conversation_id,
+                    participants=request.user
+                )
+            except Conversation.DoesNotExist:
+                return Response(
+                    {"detail": "Conversation not found or access denied"},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            
+            # Create the message
+            serializer = self.get_serializer(data={
+                'content': request.data.get('content'),
+                'conversation': conversation_id
+            })
+            serializer.is_valid(raise_exception=True)
+            
+            # Save the message with the current user as the sender
+            message = serializer.save(sender=request.user)
+            
+            # Update conversation's updated_at
+            conversation.updated_at = timezone.now()
+            conversation.save(update_fields=['updated_at'])
+            
+            # Get the created message with all fields
+            response_serializer = MessageSerializer(message, context={'request': request})
+            
+            headers = self.get_success_headers(serializer.data)
+            return Response(
+                response_serializer.data, 
+                status=status.HTTP_201_CREATED, 
+                headers=headers
+            )
+            
+        except Exception as e:
+            logger.error(f"Error creating message: {str(e)}", exc_info=True)
+            return Response(
+                {"detail": str(e)},
+                status=status.HTTP_400_BAD_REQUEST
+            )
     
     def perform_create(self, serializer):
         """Save the message and update conversation timestamp"""
-        # The conversation is already validated by the serializer
         message = serializer.save(sender=self.request.user)
         # Update conversation's updated_at
         message.conversation.save(update_fields=['updated_at'])

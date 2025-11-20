@@ -71,6 +71,12 @@ export function Sidebar({ user }: SidebarProps) {
         match: (path: string) => path.startsWith('/organization/project/reports')
       },
       { 
+        name: 'Messaging', 
+        href: '/organization/project/messaging', 
+        icon: MessageSquare,
+        match: (path: string) => path.startsWith('/organization/project/messaging')
+      },
+      { 
         name: 'Settings', 
         href: '/organization/project/settings', 
         icon: Settings,

@@ -18,17 +18,22 @@ class ChatConsumer(AsyncWebsocketConsumer):
         """Handle WebSocket connection"""
         try:
             # Get conversation ID from URL route
-            self.room_name = self.scope['url_route']['kwargs']['conversation_id']
+            self.room_name = self.scope['url_route']['kwargs'].get('conversation_id')
+            if not self.room_name:
+                logger.error("[WebSocket] No conversation_id provided")
+                await self.close(code=4000)  # Bad request
+                return
+                
             self.room_group_name = f'chat_{self.room_name}'
             
-            logger.info(f"[WebSocket] New connection attempt. Scope: {self.scope}")
+            logger.info(f"[WebSocket] New connection attempt for conversation: {self.room_name}")
             
             # Check if user is authenticated via session
-            self.user = self.scope["user"]
-            logger.info(f"[WebSocket] Initial user from scope: {self.user} (authenticated: {self.user.is_authenticated if hasattr(self.user, 'is_authenticated') else 'N/A'})")
+            self.user = self.scope.get("user", AnonymousUser())
+            logger.info(f"[WebSocket] Initial user from scope: {getattr(self.user, 'id', 'anonymous')} (authenticated: {getattr(self.user, 'is_authenticated', False)})")
             
             # If user is not authenticated, try token authentication
-            if not self.user.is_authenticated:
+            if not getattr(self.user, 'is_authenticated', False):
                 logger.info("[WebSocket] User is not authenticated, attempting token authentication")
                 query_string = self.scope.get('query_string', b'').decode('utf-8')
                 logger.info(f"[WebSocket] Query string: {query_string}")
@@ -51,7 +56,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
                             await self.close(code=4003)  # Forbidden
                             return
                             
-                        logger.info(f"[WebSocket] Authenticated as user: {self.user.id} ({self.user.email})")
+                        logger.info(f"[WebSocket] Authenticated as user: {self.user.id} ({getattr(self.user, 'email', 'no-email')})")
                         
                     except Exception as e:
                         logger.error(f"[WebSocket] Token validation error: {str(e)}", exc_info=True)
@@ -84,47 +89,15 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 'type': 'connection_established',
                 'message': 'WebSocket connection established',
                 'user_id': str(self.user.id),
-                'conversation_id': self.room_name
+                'conversation_id': self.room_name,
+                'timestamp': timezone.now().isoformat()
             }))
             logger.info("[WebSocket] Sent connection confirmation")
             
         except Exception as e:
             logger.error(f"[WebSocket] Error in connect: {str(e)}", exc_info=True)
-            await self.close(code=4000)  # Internal error
-            return
-            
-        # Join room group
             try:
-                await self.channel_layer.group_add(
-                    self.room_group_name,
-                    self.channel_name
-                )
-                logger.info(f"[WebSocket] Added to room group: {self.room_group_name}")
-            except Exception as e:
-                logger.error(f"[WebSocket] Error joining room group: {str(e)}", exc_info=True)
-                await self.close()
-                return
-            
-            # Accept the connection
-            await self.accept()
-            logger.info(f"[WebSocket] Connection accepted for user {self.user.id} in conversation {self.room_name}")
-            
-            # Send connection confirmation
-            try:
-                await self.send(text_data=json.dumps({
-                    'type': 'connection.established',
-                    'message': 'WebSocket connection established',
-                    'user_id': str(self.user.id),
-                    'conversation_id': str(self.room_name)
-                }))
-                logger.info("[WebSocket] Sent connection confirmation")
-            except Exception as e:
-                logger.error(f"[WebSocket] Error sending connection confirmation: {str(e)}", exc_info=True)
-            
-        except Exception as e:
-            logger.error(f"[WebSocket] Unexpected error in connect: {str(e)}", exc_info=True)
-            try:
-                await self.close()
+                await self.close(code=4000)  # Internal error
             except:
                 pass
 
@@ -191,164 +164,75 @@ class ChatConsumer(AsyncWebsocketConsumer):
     async def receive(self, text_data):
         """Handle incoming WebSocket messages"""
         try:
-            logger.info(f"[DEBUG] Raw message received: {text_data}")
-            text_data_json = json.loads(text_data)
-            message_type = text_data_json.get('type')
-            logger.info(f"[DEBUG] Processing message of type: {message_type}")
+            logger.info(f"[WebSocket] Raw message received: {text_data}")
+            
+            try:
+                text_data_json = json.loads(text_data)
+                message_type = text_data_json.get('type')
+                logger.info(f"[WebSocket] Processing message of type: {message_type}")
+            except json.JSONDecodeError as e:
+                logger.error(f"[WebSocket] Invalid JSON received: {text_data}")
+                return
 
             if message_type == 'chat.message':
                 try:
-                    # Get message content and validate
                     message_content = text_data_json.get('content', '').strip()
-                    conversation_id = text_data_json.get('conversation_id', self.room_name)
+                    conversation_id = text_data_json.get('conversation_id')
+                    temp_id = text_data_json.get('temp_id')
                     
-                    # Get sender information - handle both direct sender_id and sender object
-                    sender_info = text_data_json.get('sender')
-                    if sender_info and isinstance(sender_info, dict):
-                        sender_id = str(sender_info.get('id', ''))
-                        sender_email = sender_info.get('email', '')
-                        sender_first_name = sender_info.get('first_name', '')
-                        sender_last_name = sender_info.get('last_name', '')
-                    else:
-                        sender_id = str(text_data_json.get('sender_id', ''))
-                        sender_email = ''
-                        sender_first_name = ''
-                        sender_last_name = ''
-                    
-                    # If no sender_id in message, use the authenticated user's ID
-                    if not sender_id and hasattr(self, 'user') and self.user.is_authenticated:
-                        sender_id = str(self.user.id)
-                        logger.info(f"[DEBUG] Using authenticated user ID as sender: {sender_id}")
-                    
-                    logger.info(f"[DEBUG] Message content: '{message_content[:50]}...' for conversation: {conversation_id}, sender_id: {sender_id}")
-                    
-                    if not message_content:
-                        error_msg = 'Message content cannot be empty'
-                        logger.warning(error_msg)
-                        await self.send(text_data=json.dumps({
-                            'type': 'error', 
-                            'error': error_msg,
-                            'code': 'empty_message'
-                        }))
+                    if not message_content or not conversation_id:
+                        logger.error(f"[WebSocket] Missing required fields in message: {text_data_json}")
                         return
-
-                    if not conversation_id:
-                        error_msg = 'Conversation ID is required'
-                        logger.error(f"[ERROR] {error_msg}")
-                        await self.send(text_data=json.dumps({
-                            'type': 'error',
-                            'error': error_msg,
-                            'code': 'missing_conversation_id'
-                        }))
+                        
+                    logger.info(f"[WebSocket] Saving message for conversation {conversation_id}")
+                    
+                    # Save message to database
+                    message = await self.save_message(
+                        user_id=str(self.user.id),
+                        conversation_id=conversation_id,
+                        content=message_content
+                    )
+                    
+                    if not message:
+                        logger.error("[WebSocket] Failed to save message to database")
                         return
-                    
-                    if not sender_id:
-                        error_msg = 'Sender ID is required'
-                        logger.error(f"[ERROR] {error_msg}")
-                        await self.send(text_data=json.dumps({
-                            'type': 'error',
-                            'error': error_msg,
-                            'code': 'missing_sender_id'
-                        }))
-                        return
-                
-                    logger.info(f"[DEBUG] Processing message from {sender_id} in conversation {conversation_id}")
-                    
-                    # Verify the user has access to this conversation
-                    has_access = await self.check_conversation_access(user_id=sender_id, conversation_id=conversation_id)
-                    if not has_access:
-                        logger.error(f"[ERROR] User {sender_id} does not have access to conversation {conversation_id}")
-                        await self.send(text_data=json.dumps({
-                            'type': 'error',
-                            'error': 'You do not have access to this conversation',
-                            'code': 'access_denied'
-                        }))
-                        return
-                    
-                    try:
-                        # Get the sender from the database if we need more info
-                        sender = await self.get_user(sender_id)
-                        if not sender:
-                            # If we can't find the user in the DB but have sender info from the frontend, use that
-                            if sender_email or sender_first_name or sender_last_name:
-                                logger.warning(f"[WARNING] User {sender_id} not found in database, using provided sender info")
-                                sender = type('User', (), {
-                                    'id': sender_id,
-                                    'email': sender_email,
-                                    'first_name': sender_first_name,
-                                    'last_name': sender_last_name
-                                })
-                            else:
-                                raise ValueError(f"User with ID {sender_id} not found")
                         
-                        # Save the message and get the result
-                        logger.info(f"[DEBUG] Attempting to save message from {sender_id} in conversation {conversation_id}")
-                        message = await self.save_message(sender_id, message_content)
-                        if not message:
-                            raise ValueError("Failed to save message")
-                            
-                        logger.info(f"[SUCCESS] Saved message {message.id} to database")
-                        
-                        # Get the current time for the timestamp
-                        from django.utils import timezone
-                        timestamp = timezone.now()
-                        
-                        # Prepare the message data for broadcasting
-                        message_data = {
-                            'type': 'chat.message.new',
-                            'message_id': str(message.id),
-                            'content': message.content,
-                            'conversation_id': str(conversation_id),
-                            'sender': {
-                                'id': str(sender.id),
-                                'email': getattr(sender, 'email', sender_email),
-                                'first_name': getattr(sender, 'first_name', sender_first_name or ''),
-                                'last_name': getattr(sender, 'last_name', sender_last_name or ''),
-                            },
-                            'sender_id': str(sender.id),
-                            'sender_name': f"{getattr(sender, 'first_name', sender_first_name or '')} {getattr(sender, 'last_name', sender_last_name or '')}".strip() or getattr(sender, 'email', sender_email or 'Unknown User'),
-                            'timestamp': timestamp.isoformat(),
-                            'is_read': False
-                        }
+                    logger.info(f"[WebSocket] Message saved with ID: {message.id}")
                     
-                        logger.info(f"[DEBUG] Prepared message data for broadcast: {json.dumps(message_data, default=str)}")
-                        logger.info(f"[DEBUG] Sending message data: {json.dumps(message_data, indent=2)}")
-                        
-                        # Send the message to the room group
-                        await self.channel_layer.group_send(
-                            self.room_group_name,
-                            message_data
-                        )
-                        
-                    except Exception as e:
-                        error_msg = f"Error processing message: {str(e)}"
-                        logger.error(f"[ERROR] {error_msg}", exc_info=True)
-                        await self.send(text_data=json.dumps({
-                            'type': 'error',
-                            'error': error_msg,
-                            'code': 'message_processing_error'
-                        }))
-                        return
-                    
-                    # Send a success response to the sender
-                    await self.send(text_data=json.dumps({
-                        'type': 'message.sent',
+                    # Prepare message data for broadcasting
+                    message_data = {
+                        'type': 'chat.message',
                         'message_id': str(message.id),
-                        'status': 'delivered',
-                        'timestamp': timestamp.isoformat()
-                    }))
+                        'content': message.content,
+                        'sender': {
+                            'id': str(message.sender.id),
+                            'email': message.sender.email,
+                            'first_name': message.sender.first_name,
+                            'last_name': message.sender.last_name,
+                        },
+                        'conversation_id': str(conversation_id),
+                        'timestamp': message.timestamp.isoformat(),
+                        'is_read': message.is_read,
+                        'temp_id': temp_id  # Include the temp_id for client-side reference
+                    }
                     
-                    logger.info(f"[SUCCESS] Broadcasted message {message.id} to group {self.room_group_name}")
+                    # Broadcast to all in the room
+                    await self.channel_layer.group_send(
+                        f'chat_{conversation_id}',
+                        message_data
+                    )
+                    
+                    logger.info(f"[WebSocket] Message broadcasted to room chat_{conversation_id}")
                     
                 except Exception as e:
-                    logger.error(f"[ERROR] Failed to process message: {str(e)}", exc_info=True)
+                    logger.error(f"[WebSocket] Error processing chat message: {str(e)}", exc_info=True)
+                    # Send error back to sender
                     await self.send(text_data=json.dumps({
                         'type': 'error',
-                        'error': f'Failed to process message: {str(e)}',
-                        'code': 'message_processing_error'
+                        'error': 'Failed to process message',
+                        'temp_id': temp_id  # Include temp_id for client-side error handling
                     }))
-                    return
-            
+                    
             else:
                 logger.warning(f"[WARNING] Unhandled message type: {message_type}")
                 await self.send(text_data=json.dumps({
@@ -375,17 +259,42 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 'code': 'server_error'
             }))
 
-    async def chat_message_new(self, event):
-        """Handle chat.message.new event"""
+    async def chat_message(self, event):
+        """Handle chat message event"""
         try:
-            # Send the message to the WebSocket
-            await self.send(text_data=json.dumps(event))
-            logger.info(f"[DEBUG] Sent message to WebSocket: {event.get('message_id')}")
+            # Skip if this is the sender's own message (they already have it)
+            if str(self.user.id) == event.get('sender', {}).get('id'):
+                logger.debug("[WebSocket] Skipping echo of own message")
+                return
+                
+            logger.info(f"[WebSocket] Sending message to client: {event.get('message_id')}")
+            
+            # Send message to WebSocket
+            await self.send(text_data=json.dumps({
+                'type': 'chat.message',
+                'message_id': event['message_id'],
+                'content': event['content'],
+                'sender': event['sender'],
+                'timestamp': event['timestamp'],
+                'is_read': event.get('is_read', False),
+                'conversation_id': event['conversation_id'],
+                'temp_id': event.get('temp_id')  # Pass through temp_id if present
+            }))
+            
+            logger.debug(f"[WebSocket] Message {event.get('message_id')} sent to client")
+            
         except Exception as e:
-            logger.error(f"[ERROR] Error sending message to WebSocket: {str(e)}", exc_info=True)
-            # If we can't send the message, close the connection
-            await self.close(code=1011)  # Internal error
-    
+            logger.error(f"[WebSocket] Error in chat_message: {str(e)}", exc_info=True)
+            # Try to send an error response if possible
+            try:
+                await self.send(text_data=json.dumps({
+                    'type': 'error',
+                    'error': 'Failed to process incoming message',
+                    'details': str(e)
+                }))
+            except:
+                pass
+
     async def user_typing(self, event):
         """Handle typing indicator"""
         try:
@@ -404,9 +313,9 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 'type': 'error',
                 'error': f'Failed to handle typing indicator: {str(e)}'
             }))
-    
+
     @database_sync_to_async
-    def save_message(self, sender_id, content):
+    def save_message(self, user_id, conversation_id, content):
         """Save message to database"""
         from django.utils import timezone
         from django.db import transaction
@@ -416,16 +325,16 @@ class ChatConsumer(AsyncWebsocketConsumer):
         User = get_user_model()
         
         try:
-            logger.info(f"[DEBUG] save_message called with sender_id={sender_id}, content='{content[:50]}...'")
+            logger.info(f"[DEBUG] save_message called with user_id={user_id}, content='{content[:50]}...'")
             
             with transaction.atomic():
                 # Get the sender
                 try:
-                    sender = User.objects.get(id=sender_id)
+                    sender = User.objects.get(id=user_id)
                     logger.info(f"[DEBUG] Found sender: {sender.email}")
                 except User.DoesNotExist as e:
-                    logger.error(f"[ERROR] User with ID {sender_id} not found: {str(e)}")
-                    raise ValueError(f"User with ID {sender_id} not found")
+                    logger.error(f"[ERROR] User with ID {user_id} not found: {str(e)}")
+                    raise ValueError(f"User with ID {user_id} not found")
                 
                 # Get the conversation
                 try:
@@ -436,11 +345,11 @@ class ChatConsumer(AsyncWebsocketConsumer):
                     raise ValueError(f"Conversation with ID {self.room_name} not found")
                 
                 # Verify user is a participant
-                is_participant = conversation.participants.filter(id=sender_id).exists()
-                logger.info(f"[DEBUG] Is user {sender_id} a participant? {is_participant}")
+                is_participant = conversation.participants.filter(id=user_id).exists()
+                logger.info(f"[DEBUG] Is user {user_id} a participant? {is_participant}")
                 
                 if not is_participant:
-                    error_msg = f"User {sender_id} is not a participant in conversation {self.room_name}"
+                    error_msg = f"User {user_id} is not a participant in conversation {self.room_name}"
                     logger.error(error_msg)
                     raise ValueError("You are not a participant in this conversation")
                 

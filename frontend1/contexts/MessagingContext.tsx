@@ -71,195 +71,250 @@ export const MessagingProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [wsUrl, setWsUrl] = useState<string>('');
+
+  // Initialize WebSocket connection
+  useEffect(() => {
+    if (!token || !user?.id) return;
+
+    // Set up WebSocket URL
+    const wsBaseUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000';
+    const wsUrl = `${wsBaseUrl}${wsBaseUrl.endsWith('/') ? '' : '/'}ws/chat/`;
+    
+    console.log('[WebSocket] Connecting to:', wsUrl);
+    webSocketService.connect(wsUrl, token)
+      .then(() => {
+        console.log('[WebSocket] Connected successfully');
+      })
+      .catch(error => {
+        console.error('[WebSocket] Connection error:', error);
+      });
+
+    // Clean up on unmount
+    return () => {
+      console.log('[WebSocket] Cleaning up WebSocket connection');
+      webSocketService.disconnect();
+    };
+  }, [token, user?.id]);
 
   // Handle incoming WebSocket messages
   const handleIncomingMessage = useCallback((message: {
     type: string;
-    conversation_id?: string;
+    conversation_id?: string | number;
     message_id?: string;
     content?: string;
     message?: string;
-    sender_id?: string;
+    sender_id?: string | number;
     sender_email?: string;
     sender_name?: string;
     sender?: {
-      id: string;
+      id: string | number;
       email: string;
       first_name: string;
       last_name: string;
+      avatar?: string;
     };
     timestamp?: string;
     is_read?: boolean;
+    temp_id?: string;
   }) => {
-    console.log('Processing incoming message:', message);
-    
-    if (message.type === 'chat.message' || message.type === 'chat.message.new') {
-      const conversationId = message.conversation_id || currentConversation?.id;
-      if (!conversationId) {
-        console.warn('Received message without conversation ID');
-        return;
-      }
-      
-      // Skip if this is our own message that we've already processed
-      if (user && message.sender_id === user.id && message.message_id?.startsWith('temp-')) {
-        console.log('Skipping own message that we already processed');
-        return;
+    console.log('[WebSocket] Processing incoming message:', message);
+
+    if (message.type === 'chat.message' || message.type === 'chat.message.new' || message.type === 'message') {
+    const conversationId = String(message.conversation_id || currentConversation?.id || '');
+    if (!conversationId) {
+      console.warn('Received message without conversation ID', message);
+      return;
+    }
+
+    // Skip if this is our own message that we've already processed
+    if (user && message.sender_id === user.id && message.message_id?.startsWith('temp-')) {
+      console.log('Skipping own message that we already processed');
+      return;
+    }
+
+    // Ensure sender ID is a string
+    const senderId = message.sender_id ? String(message.sender_id) : (message.sender?.id ? String(message.sender.id) : 'unknown');
+
+    const newMessage: Message = {
+      id: message.message_id || `temp-${Date.now()}`,
+      content: message.content || message.message || '',
+      sender: message.sender ? {
+        ...message.sender,
+        id: String(message.sender.id)
+      } : {
+        id: senderId,
+        email: message.sender_email || '',
+        first_name: message.sender_name?.split(' ')[0] || 'Unknown',
+        last_name: message.sender_name?.split(' ').slice(1).join(' ') || 'User',
+      },
+      timestamp: message.timestamp || new Date().toISOString(),
+      is_read: message.is_read || false,
+    };
+
+    console.log('Created message object:', newMessage);
+
+    // Update messages state
+    setMessages(prev => {
+      // Check if message already exists (by ID or content)
+      const messageExists = prev.some(m => 
+        m.id === newMessage.id || 
+        (m.content === newMessage.content && 
+         m.sender.id === newMessage.sender.id &&
+         Math.abs(new Date(m.timestamp).getTime() - new Date(newMessage.timestamp).getTime()) < 3000)
+      );
+
+      if (messageExists) {
+        console.log('Message already exists, updating...');
+        return prev.map(m => 
+          (m.id === newMessage.id || 
+           (m.content === newMessage.content && 
+            m.sender.id === newMessage.sender.id &&
+            Math.abs(new Date(m.timestamp).getTime() - new Date(newMessage.timestamp).getTime()) < 3000))
+            ? { ...m, ...newMessage, id: newMessage.id } // Preserve server ID
+            : m
+        );
       }
 
-      const newMessage: Message = {
-        id: message.message_id || `temp-${Date.now()}`,
-        content: message.content || message.message || '',
-        sender: message.sender || {
-          id: message.sender_id || 'unknown',
-          email: message.sender_email || '',
-          first_name: message.sender_name?.split(' ')[0] || 'Unknown',
-          last_name: message.sender_name?.split(' ').slice(1).join(' ') || 'User',
-        },
-        timestamp: message.timestamp || new Date().toISOString(),
-        is_read: message.is_read || false,
-      };
+      // Add new message and sort by timestamp
+      const updated = [...prev, newMessage].sort((a, b) => 
+        new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+      );
 
-      console.log('Adding/updating message:', newMessage);
-      
-      // Check if this is an update to an existing message (replacing a temp message)
-      setMessages(prev => {
-        // If this is a new message with a server-generated ID, replace any temp message with the same content
-        if (message.message_id && message.message_id.startsWith('temp-')) {
-          const existingIndex = prev.findIndex(
-            m => m.content === newMessage.content && 
-                 m.sender.id === newMessage.sender.id &&
-                 Math.abs(new Date(m.timestamp).getTime() - new Date(newMessage.timestamp).getTime()) < 10000 // Within 10 seconds
-          );
-          
-          if (existingIndex >= 0) {
-            console.log(`Replacing temp message at index ${existingIndex} with server message`, {
-              oldId: prev[existingIndex].id,
-              newId: newMessage.id
-            });
-            const updated = [...prev];
-            updated[existingIndex] = newMessage;
-            return updated;
-          }
-        }
-        
-        // Check if this message already exists (by ID)
-        const exists = prev.some(m => m.id === newMessage.id);
-        if (exists) {
-          console.log('Message already exists, not adding again');
-          return prev;
-        }
-        
-        return [...prev, newMessage];
-      });
-      
-      // Update last message in conversations
-      setConversations(prev => {
-        const updated = prev.map(conv => {
-          if (conv.id === conversationId) {
-            return { 
-              ...conv,
-              last_message: newMessage,
-              updated_at: new Date().toISOString(),
-              unread_count: conv.id === currentConversation?.id ? 0 : (conv.unread_count || 0) + 1
-            };
-          }
-          return conv;
-        });
-        
-        // If this is a new conversation, we might need to add it
-        if (!prev.some(conv => conv.id === conversationId)) {
-          console.log('Adding new conversation for message');
-          // Create participants array with both sender and current user (if not the same)
-          const participants: Array<{
-            id: string;
-            email: string;
-            first_name: string;
-            last_name: string;
-            avatar: string | undefined;
-          }> = [
-            {
-              id: String(newMessage.sender.id),
-              email: newMessage.sender.email,
-              first_name: newMessage.sender.first_name,
-              last_name: newMessage.sender.last_name,
-              avatar: (newMessage.sender as any).avatar
-            }
-          ];
-          
-          // Add current user to participants if they're not the sender
-          if (user && String(user.id) !== String(newMessage.sender.id)) {
-            participants.push({
-              id: String(user.id),
-              email: user.email || '',
-              first_name: user.first_name || '',
-              last_name: user.last_name || '',
-              avatar: user.avatar
-            });
-          }
-          
-          updated.push({
-            id: conversationId,
-            participants,
-            messages: [newMessage],
+      console.log('Added new message to state. Total messages:', updated.length);
+      return updated;
+    });
+
+    // Update conversations list to show the new message in the sidebar
+    setConversations(prev => {
+      return prev.map(conv => {
+        if (conv.id === conversationId) {
+          console.log('Updating conversation with new message:', newMessage);
+          return {
+            ...conv,
             last_message: newMessage,
-            unread_count: 1,
-            is_group: false,
-            name: newMessage.sender.first_name + ' ' + newMessage.sender.last_name
+            updated_at: new Date().toISOString(),
+            unread_count: newMessage.sender.id === user?.id ? 0 : (conv.unread_count || 0) + 1
+          };
+        }
+        return conv;
+      });
+    });
+
+    // If this is a new conversation, add it to the list
+    if (!conversations.some(conv => conv.id === conversationId)) {
+      console.log('Adding new conversation for message');
+      setConversations(prev => {
+        const participants = [
+          {
+            id: String(newMessage.sender.id),
+            email: newMessage.sender.email,
+            first_name: newMessage.sender.first_name,
+            last_name: newMessage.sender.last_name,
+            avatar: (newMessage.sender as any).avatar
+          }
+        ];
+
+        // Add current user to participants if they're not the sender
+        if (user && String(user.id) !== String(newMessage.sender.id)) {
+          participants.push({
+            id: String(user.id),
+            email: user.email,
+            first_name: user.first_name,
+            last_name: user.last_name || '',
+            avatar: user.avatar
           });
         }
-        
-        return updated;
+
+        return [{
+          id: conversationId,
+          participants,
+          last_message: newMessage,
+          unread_count: 0,
+          updated_at: new Date().toISOString(),
+          is_group: false,
+          name: newMessage.sender.first_name + ' ' + newMessage.sender.last_name
+        }, ...prev];
       });
-      
-      // If this is our own message, mark it as read immediately
-      if (user && newMessage.sender.id === user.id) {
-        markConversationAsRead(conversationId).catch(console.error);
-      }
-    } else {
-      console.log('Ignoring unknown message type:', message.type);
     }
-  }, [currentConversation, user]);
+  }
+}, [user, currentConversation, conversations]);
 
   // Initialize WebSocket connection
   useEffect(() => {
+    if (typeof window === 'undefined') return; // Skip during SSR
+
     if (!user || !token) {
       console.log('WebSocket: Missing user or token, not connecting');
       return;
     }
 
-    // Construct WebSocket URL directly to avoid double API prefix
-    const wsUrl = `ws://localhost:8000/ws/chat/`;
+    // Construct WebSocket URL to point to the backend server on port 8000
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsHost = window.location.hostname + ':8000'; // Always use port 8000 for backend
+    const newWsUrl = `${wsProtocol}//${wsHost}/ws/chat/`;
 
-    console.log('WebSocket: Connecting to', wsUrl);
-    
-    try {
-      webSocketService.connect(wsUrl, token);
-      console.log('WebSocket: Connection initiated');
+    console.log('WebSocket: Initializing with URL:', newWsUrl);
+    setWsUrl(newWsUrl);
 
-      // Set up message handler
-      const handleMessage = (message: any) => {
-        console.log('WebSocket: Received message', message);
+    // Log connection status periodically
+    const logConnectionStatus = () => {
+      console.log('WebSocket status:', {
+        state: webSocketService.getConnectionState(),
+        readyState: webSocketService.getReadyState(),
+        isConnected: webSocketService.isConnected(),
+        hasToken: !!token,
+        url: newWsUrl,
+        currentUser: user ? { id: user.id, email: user.email } : 'No user'
+      });
+    };
+
+    const statusInterval = setInterval(logConnectionStatus, 5000);
+    logConnectionStatus();
+
+    // Set up message handler
+    const handleMessage = (message: any) => {
+      console.log('WebSocket: Received message', JSON.stringify(message, null, 2));
+      try {
         handleIncomingMessage(message);
-      };
-      
-      webSocketService.onMessage(handleMessage);
+      } catch (error) {
+        console.error('Error handling incoming message:', error);
+      }
+    };
 
-      // Log connection status changes
-      const checkConnection = setInterval(() => {
-        console.log('WebSocket status:', webSocketService.getConnectionState());
-      }, 5000);
+    // Connect to WebSocket
+    const connectWebSocket = async () => {
+      try {
+        console.log('WebSocket: Attempting to connect...');
+        await webSocketService.connect(newWsUrl, token);
+        console.log('WebSocket: Connection successful');
+        webSocketService.onMessage(handleMessage);
 
-      // Clean up on unmount
-      return () => {
-        console.log('WebSocket: Cleaning up...');
-        clearInterval(checkConnection);
-        webSocketService.offMessage(handleMessage);
-        webSocketService.disconnect();
-      };
-    } catch (error) {
-      console.error('WebSocket connection error:', error);
-    }
-  }, [user, token, handleIncomingMessage]);
+        // Send a test message to verify the connection
+        if (webSocketService.isConnected()) {
+          console.log('WebSocket: Sending test message');
+          webSocketService.sendMessage({
+            type: 'ping',
+            timestamp: Date.now()
+          });
+        }
+      } catch (error) {
+        console.error('WebSocket connection failed:', error);
+        // Try to reconnect after a delay
+        setTimeout(connectWebSocket, 5000);
+      }
+    };
+
+    connectWebSocket();
+
+    // Clean up on unmount
+    return () => {
+      console.log('WebSocket: Cleaning up...');
+      clearInterval(statusInterval);
+      webSocketService.offMessage(handleMessage);
+      webSocketService.disconnect();
+    };
+  }, [token, handleIncomingMessage, user]);
 
   // Fetch organization users
   const fetchOrganizationUsers = useCallback(async () => {
@@ -267,28 +322,28 @@ export const MessagingProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       console.error('No authentication token available');
       return [];
     }
-    
+
     try {
       console.log('Fetching current user data...');
       // First, get the current user's organization ID from the JWT token
       const tokenPayload = JSON.parse(atob(token.split('.')[1]));
       const organizationId = tokenPayload.organization_id;
-      
+
       console.log('JWT Token payload:', tokenPayload);
-      
+
       if (!organizationId) {
         console.warn('No organization ID found in JWT token');
         setOrganizationUsers([]);
         return [];
       }
-      
+
       console.log('Using organization ID from JWT:', organizationId);
 
       // Then fetch the organization members
       console.log('Fetching organization members...');
       const membersUrl = getApiUrl(`org/organizations/${organizationId}/members/`);
       console.log('Members URL:', membersUrl);
-      
+
       const response = await fetch(membersUrl, {
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -310,7 +365,7 @@ export const MessagingProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
       const data = await response.json();
       console.log('Raw API response:', data);
-      
+
       // Handle different response structures
       let users: any[] = [];
       if (Array.isArray(data)) {
@@ -322,15 +377,15 @@ export const MessagingProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       } else if (data.members && Array.isArray(data.members)) {
         users = data.members;
       }
-      
+
       console.log('Extracted users:', users);
-      
+
       if (users.length === 0) {
         console.warn('No users found in the organization');
         setOrganizationUsers([]);
         return [];
       }
-      
+
       // Transform the users to match our User interface
       const currentUserId = tokenPayload.user_id;
       const formattedUsers = users
@@ -341,7 +396,7 @@ export const MessagingProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           const lastName = userData.last_name || '';
           const email = userData.email || '';
           const userId = String(userData.id || ''); // Use the user's ID, not the member ID
-          
+
           return {
             id: userId,  // This is the actual User ID
             email: email,
@@ -354,14 +409,23 @@ export const MessagingProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           };
         })
         .filter(user => {
-          // Filter out any users that don't have required fields and the current user
+          // Make filtering more lenient - only filter out the current user
+          // and users with no ID or email
           const isValid = !!user.id && !!user.email && user.id !== currentUserId;
+
           if (!isValid) {
-            console.warn('Filtered out user (missing fields or current user):', user);
+            console.warn('Filtering out user due to missing fields or current user:', {
+              id: user.id,
+              email: user.email,
+              isCurrentUser: user.id === currentUserId,
+              hasId: !!user.id,
+              hasEmail: !!user.email,
+              userObject: user
+            });
           }
           return isValid;
         });
-      
+
       console.log('Formatted organization users:', formattedUsers);
       setOrganizationUsers(formattedUsers);
       return formattedUsers;
@@ -382,9 +446,9 @@ export const MessagingProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         console.error('Error in fetchOrganizationUsers effect:', error);
       }
     };
-    
+
     fetchData();
-    
+
     // Set up a timer to refetch after 5 seconds if no users are loaded
     const timer = setTimeout(() => {
       if (organizationUsers.length === 0) {
@@ -392,16 +456,16 @@ export const MessagingProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         fetchData();
       }
     }, 5000);
-    
+
     return () => clearTimeout(timer);
   }, [fetchOrganizationUsers, organizationUsers.length]);
 
   const fetchConversations = useCallback(async (): Promise<Conversation[]> => {
     if (!token) return [];
-    
+
     try {
       setLoading(true);
-      
+
       // Fetch conversations from the API
       const response = await fetch(getApiUrl('messaging/conversations/'), {
         headers: {
@@ -415,10 +479,10 @@ export const MessagingProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         console.error('Failed to fetch conversations:', errorData);
         throw new Error(errorData.detail || 'Failed to fetch conversations');
       }
-      
+
       const data = await response.json();
       const conversations = Array.isArray(data) ? data : (data.results || []);
-      
+
       // Format the conversations to match our interface
       const formattedConversations = conversations.map((conv: any) => ({
         id: String(conv.id),
@@ -435,7 +499,7 @@ export const MessagingProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         is_group: conv.is_group || false,
         name: conv.name || null,
       }));
-      
+
       setConversations(formattedConversations);
       return formattedConversations;
     } catch (error) {
@@ -463,7 +527,7 @@ export const MessagingProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           },
         }
       );
-      
+
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         console.error('Error marking conversation as read:', response.status, errorData);
@@ -471,10 +535,10 @@ export const MessagingProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       }
 
       // Update unread count
-      setConversations(prev => 
-        prev.map(conv => 
-          conv.id === conversationId 
-            ? { ...conv, unread_count: 0 } 
+      setConversations(prev =>
+        prev.map(conv =>
+          conv.id === conversationId
+            ? { ...conv, unread_count: 0 }
             : conv
         )
       );
@@ -506,16 +570,16 @@ export const MessagingProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       }
 
       const data = await response.json();
-      
+
       // Ensure messages are in the correct format
       const formattedMessages = Array.isArray(data) ? data : (data.results || data.messages || []);
-      
+
       setMessages(formattedMessages);
 
       // Update the conversation with the fetched messages
-      setConversations(prevConversations => 
-        prevConversations.map(conv => 
-          conv.id === conversationId 
+      setConversations(prevConversations =>
+        prevConversations.map(conv =>
+          conv.id === conversationId
             ? { ...conv, messages: formattedMessages }
             : conv
         )
@@ -533,6 +597,7 @@ export const MessagingProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   // Send a new message
   const handleSendMessage = useCallback(async (content: string, conversationId: string): Promise<boolean> => {
+    console.log('handleSendMessage called with:', { content, conversationId, hasToken: !!token, hasUser: !!user });
     if (!token || !conversationId || !currentConversation || !user) {
       console.error('Cannot send message: Missing required data', {
         hasToken: !!token,
@@ -544,10 +609,10 @@ export const MessagingProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
 
     console.log('Sending message to conversation:', conversationId);
-    
+
     const message = {
       conversation_id: conversationId,
-      content,
+      content: content, // Ensure we're using the content parameter
       timestamp: new Date().toISOString(),
     };
 
@@ -570,77 +635,124 @@ export const MessagingProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     setMessages(prev => [...prev, tempMessage]);
 
     try {
+      // Convert conversationId to number for WebSocket message
+      const numericConversationId = Number(conversationId);
+      if (isNaN(numericConversationId)) {
+        throw new Error('Invalid conversation ID for WebSocket');
+      }
+
       // Send via WebSocket
       const wsMessage = {
         type: 'chat.message',
-        conversation_id: conversationId,
-        content,
-        sender_id: user.id,  // Changed from sender object to sender_id
-        sender: {  // Keep sender object for backward compatibility
+        conversation_id: numericConversationId,
+        content: content,
+        sender_id: user.id,
+        sender: {
           id: user.id,
           email: user.email,
           first_name: user.first_name,
-          last_name: user.last_name
+          last_name: user.last_name,
+          avatar: user.avatar
         },
-        timestamp: message.timestamp
+        timestamp: message.timestamp,
+        temp_id: tempId
       };
-      
+
       console.log('Sending WebSocket message:', wsMessage);
-      
+
       // Check if WebSocket is connected before sending
+      const connectionState = webSocketService.getConnectionState();
       if (!webSocketService.isConnected()) {
-        console.error('WebSocket is not connected. Current state:', webSocketService.getConnectionState());
-        throw new Error('Failed to send message - WebSocket not connected');
+        console.warn('WebSocket is not connected. Current state:', connectionState);
+        console.log('Attempting to reconnect WebSocket...');
+        try {
+          if (!wsUrl) {
+            throw new Error('WebSocket URL not initialized');
+          }
+          await webSocketService.connect(wsUrl, token);
+          console.log('WebSocket reconnected successfully');
+        } catch (err) {
+          console.error('Failed to reconnect WebSocket:', err);
+          // Continue with HTTP fallback even if WebSocket fails
+          console.warn('Proceeding with HTTP fallback for message sending');
+        }
       }
-      
-      webSocketService.sendMessage(wsMessage);
-      console.log('WebSocket message sent successfully');
-      
+
+      try {
+        webSocketService.sendMessage(wsMessage);
+        console.log('WebSocket message sent successfully');
+      } catch (err) {
+        console.error('Error sending WebSocket message:', err);
+        throw new Error('Failed to send message - ' + (err instanceof Error ? err.message : 'Unknown error'));
+      }
+
       // Also send via HTTP as a fallback
       try {
+        // Ensure conversationId is a number
+        const numericConversationId = Number(conversationId);
+        if (isNaN(numericConversationId)) {
+          throw new Error('Invalid conversation ID');
+        }
+
         const response = await fetch(getApiUrl('messaging/messages/'), {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${token}`
           },
-          body: JSON.stringify({ 
+          body: JSON.stringify({
             content,
-            conversation: conversationId,
-            sender: user.id
+            conversation: numericConversationId
+            // Note: Removed sender as it's set by the backend
           })
         });
-        
+
         if (!response.ok) {
           const errorData = await response.json().catch(() => ({}));
           console.error('Failed to send message via HTTP:', errorData);
           throw new Error(errorData.detail || 'Failed to send message');
         } else {
           console.log('Message sent successfully via HTTP');
-          
+
           // Update the conversation's last_message in the conversations list
           const newMessage = await response.json();
-          
-          setConversations(prevConversations => 
-            prevConversations.map(conv => 
-              conv.id === conversationId
+
+          setConversations(prevConversations =>
+            prevConversations.map(conv =>
+              String(conv.id) === String(conversationId)
                 ? {
-                    ...conv,
-                    last_message: {
-                      id: String(newMessage.id), // Ensure ID is string
+                  ...conv,
+                  last_message: {
+                    id: String(newMessage.id), // Ensure ID is string
+                    content: newMessage.content,
+                    sender: {
+                      id: String(user.id), // Convert user.id to string
+                      email: user.email,
+                      first_name: user.first_name,
+                      last_name: user.last_name || ''
+                    },
+                    timestamp: newMessage.timestamp || new Date().toISOString(),
+                    is_read: true
+                  },
+                  unread_count: 0,
+                  updated_at: new Date().toISOString(),
+                  // Ensure messages array is updated
+                  messages: [
+                    ...(conv.messages || []),
+                    {
+                      id: String(newMessage.id),
                       content: newMessage.content,
                       sender: {
-                        id: String(user.id), // Convert user.id to string
+                        id: String(user.id),
                         email: user.email,
                         first_name: user.first_name,
                         last_name: user.last_name || ''
                       },
                       timestamp: newMessage.timestamp || new Date().toISOString(),
                       is_read: true
-                    },
-                    unread_count: 0,
-                    updated_at: new Date().toISOString()
-                  }
+                    }
+                  ]
+                }
                 : conv
             )
           );
@@ -667,10 +779,10 @@ export const MessagingProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const conversation = conversations.find(c => c.id === conversationId);
     if (conversation) {
       setCurrentConversation(conversation);
-      
+
       // First set the current conversation with existing messages (for immediate UI update)
       setMessages(conversation.messages || []);
-      
+
       try {
         // Then fetch the latest messages from the server
         await fetchMessages(conversationId);
@@ -678,7 +790,7 @@ export const MessagingProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         console.error('Error fetching messages:', error);
         // Keep the existing messages if there's an error
       }
-      
+
       // Mark the conversation as read
       await markConversationAsRead(conversationId);
     }
@@ -686,78 +798,78 @@ export const MessagingProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   // Create a new conversation
   const handleCreateConversation = useCallback(async (participantIds: string[], isGroup: boolean = false, name: string = '') => {
-  if (!token) {
-    console.error('No authentication token available');
-    throw new Error('Authentication required');
-  }
-
-  try {
-    // Ensure participantIds is an array of strings
-    const validParticipantIds = Array.isArray(participantIds) 
-      ? participantIds.map(id => String(id).trim()).filter(id => id)
-      : [];
-
-    if (validParticipantIds.length === 0 && !isGroup) {
-      throw new Error('At least one participant is required for a direct conversation');
+    if (!token) {
+      console.error('No authentication token available');
+      throw new Error('Authentication required');
     }
 
-    // Prepare the payload with participant IDs and conversation type
-    const payload = {
-      participant_ids: validParticipantIds,
-      is_group: isGroup,
-      ...(isGroup && name ? { name } : {})
-    };
-    
-    console.log('Creating conversation with payload:', payload);
-    
-    const response = await fetch(getApiUrl('messaging/conversations/'), {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-      },
-      body: JSON.stringify(payload)
-    });
+    try {
+      // Ensure participantIds is an array of strings
+      const validParticipantIds = Array.isArray(participantIds)
+        ? participantIds.map(id => String(id).trim()).filter(id => id)
+        : [];
 
-    if (!response.ok) {
-      let errorMessage = `Failed to create conversation: ${response.status} ${response.statusText}`;
-      
-      try {
-        const errorData = await response.json();
-        console.error('Failed to create conversation:', {
-          status: response.status,
-          statusText: response.statusText,
-          errorData,
-          payload
-        });
-        
-        // If the backend provides specific validation errors, use them
-        if (errorData.participant_ids) {
-          errorMessage = `Validation error: ${Array.isArray(errorData.participant_ids) ? errorData.participant_ids.join(', ') : errorData.participant_ids}`;
-        } else {
-          errorMessage = errorData.detail || errorData.message || errorMessage;
-        }
-      } catch (e) {
-        console.error('Failed to parse error response:', e);
+      if (validParticipantIds.length === 0 && !isGroup) {
+        throw new Error('At least one participant is required for a direct conversation');
       }
-      
-      throw new Error(errorMessage);
-    }
 
-    const newConversation = await response.json();
-    console.log('Successfully created conversation:', newConversation);
-    
-    // Update the conversations list
-    setConversations(prev => [newConversation, ...prev]);
-    return newConversation;
-  } catch (err) {
-    const error = err instanceof Error ? err : new Error('Failed to create conversation');
-    setError(error.message);
-    console.error('Error creating conversation:', error);
-    throw error; // Re-throw to allow handling in the component
-  }
-}, [token]);
+      // Prepare the payload with participant IDs and conversation type
+      const payload = {
+        participant_ids: validParticipantIds,
+        is_group: isGroup,
+        ...(isGroup && name ? { name } : {})
+      };
+
+      console.log('Creating conversation with payload:', payload);
+
+      const response = await fetch(getApiUrl('messaging/conversations/'), {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) {
+        let errorMessage = `Failed to create conversation: ${response.status} ${response.statusText}`;
+
+        try {
+          const errorData = await response.json();
+          console.error('Failed to create conversation:', {
+            status: response.status,
+            statusText: response.statusText,
+            errorData,
+            payload
+          });
+
+          // If the backend provides specific validation errors, use them
+          if (errorData.participant_ids) {
+            errorMessage = `Validation error: ${Array.isArray(errorData.participant_ids) ? errorData.participant_ids.join(', ') : errorData.participant_ids}`;
+          } else {
+            errorMessage = errorData.detail || errorData.message || errorMessage;
+          }
+        } catch (e) {
+          console.error('Failed to parse error response:', e);
+        }
+
+        throw new Error(errorMessage);
+      }
+
+      const newConversation = await response.json();
+      console.log('Successfully created conversation:', newConversation);
+
+      // Update the conversations list
+      setConversations(prev => [newConversation, ...prev]);
+      return newConversation;
+    } catch (err) {
+      const error = err instanceof Error ? err : new Error('Failed to create conversation');
+      setError(error.message);
+      console.error('Error creating conversation:', error);
+      throw error; // Re-throw to allow handling in the component
+    }
+  }, [token]);
 
   // Initial data fetch
   useEffect(() => {

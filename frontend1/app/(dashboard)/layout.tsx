@@ -63,12 +63,12 @@ export default function DashboardLayout({
         
         // Define allowed paths based on role
         const allowedPaths: Record<string, string[]> = {
-          'superadmin': ['/superadmin', '/organization', '/dashboard'],
-          'admin': ['/organization', '/dashboard'],
+          'superadmin': ['/superadmin', '/organization', '/dashboard', '/clients'],
+          'admin': ['/organization', '/dashboard', '/clients'],
           'user': ['/dashboard'],
           // Add other roles with their allowed paths
-          'project_manager': ['/organization/projects', '/dashboard'],
-          'salesperson': ['/organization', '/dashboard'],
+          'project_manager': ['/organization/projects', '/dashboard', '/clients'],
+          'salesperson': ['/organization', '/dashboard', '/clients'],
           'verifier': ['/organization', '/dashboard'],
           'support': ['/organization', '/dashboard'],
           'developer': ['/organization', '/dashboard']

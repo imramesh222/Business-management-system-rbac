@@ -1,35 +1,146 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
+import { useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { useToast } from '@/components/ui/use-toast';
 import { ArrowLeft } from 'lucide-react';
-import { ClientForm } from '../_components/client-form';
 
 export default function NewClientPage() {
   const router = useRouter();
+  const { toast } = useToast();
+  const [isLoading, setIsLoading] = useState(false);
+  const [formData, setFormData] = useState({
+    name: '',
+    email: '',
+    phone: '',
+    address: '',
+  });
 
-  const handleSuccess = () => {
-    router.push('/clients');
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsLoading(true);
+
+    try {
+      const response = await fetch('/api/v1/clients/', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(formData),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to create client');
+      }
+
+      toast({
+        title: 'Success',
+        description: 'Client created successfully',
+      });
+      
+      // Redirect back to clients list
+      router.push('/clients');
+    } catch (error) {
+      console.error('Error creating client:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to create client',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({
+      ...prev,
+      [name]: value,
+    }));
   };
 
   return (
-    <div className="container mx-auto py-10">
-      <div className="flex items-center space-x-4 mb-6">
-        <Button
-          variant="outline"
-          size="icon"
-          className="h-8 w-8"
+    <div className="space-y-6 p-6">
+      <div className="flex items-center space-x-4">
+        <Button 
+          variant="outline" 
+          size="icon" 
           onClick={() => router.back()}
+          className="h-8 w-8" 
         >
           <ArrowLeft className="h-4 w-4" />
-          <span className="sr-only">Back</span>
         </Button>
-        <h1 className="text-2xl font-bold">Add New Client</h1>
+        <h2 className="text-3xl font-bold tracking-tight">Add New Client</h2>
       </div>
-      
-      <div className="bg-white rounded-lg shadow p-6">
-        <ClientForm onSuccess={handleSuccess} />
-      </div>
+
+      <form onSubmit={handleSubmit} className="space-y-6 max-w-2xl">
+        <div className="space-y-2">
+          <Label htmlFor="name">Client Name *</Label>
+          <Input
+            id="name"
+            name="name"
+            value={formData.name}
+            onChange={handleChange}
+            placeholder="Enter client name"
+            required
+          />
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label htmlFor="email">Email</Label>
+            <Input
+              id="email"
+              name="email"
+              type="email"
+              value={formData.email}
+              onChange={handleChange}
+              placeholder="Enter email address"
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="phone">Phone</Label>
+            <Input
+              id="phone"
+              name="phone"
+              type="tel"
+              value={formData.phone}
+              onChange={handleChange}
+              placeholder="Enter phone number"
+            />
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="address">Address</Label>
+          <Input
+            id="address"
+            name="address"
+            value={formData.address}
+            onChange={handleChange}
+            placeholder="Enter address"
+          />
+        </div>
+
+        <div className="flex justify-end space-x-3 pt-4">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => router.push('/clients')}
+            disabled={isLoading}
+          >
+            Cancel
+          </Button>
+          <Button type="submit" disabled={isLoading}>
+            {isLoading ? 'Saving...' : 'Save Client'}
+          </Button>
+        </div>
+      </form>
     </div>
   );
 }

@@ -6,7 +6,21 @@ import { Button } from '@/components/ui/button';
 import { Plus } from 'lucide-react';
 import { ProjectForm } from './ProjectForm';
 
-export function NewProjectDialog({ onProjectCreated }: { onProjectCreated?: () => void }) {
+interface NewProjectDialogProps {
+  onProjectCreated?: () => void;
+  organizationId: string;
+  isSuperAdmin?: boolean;
+  isOrgAdmin?: boolean;
+  currentUser?: any;
+}
+
+export function NewProjectDialog({ 
+  onProjectCreated, 
+  organizationId, 
+  isSuperAdmin = false, 
+  isOrgAdmin = false,
+  currentUser 
+}: NewProjectDialogProps) {
   const [open, setOpen] = useState(false);
 
   const handleSuccess = () => {
@@ -16,10 +30,22 @@ export function NewProjectDialog({ onProjectCreated }: { onProjectCreated?: () =
     }
   };
 
+  const handleButtonClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    console.log('Button clicked, opening dialog');
+    setOpen(true);
+  };
+
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button>
+        <Button 
+          variant="default" 
+          size="sm" 
+          className="ml-2"
+          onClick={handleButtonClick}
+        >
           <Plus className="mr-2 h-4 w-4" />
           New Project
         </Button>
@@ -31,7 +57,11 @@ export function NewProjectDialog({ onProjectCreated }: { onProjectCreated?: () =
         <div className="py-4">
           <ProjectForm 
             onSuccess={handleSuccess} 
-            onCancel={() => setOpen(false)} 
+            onCancel={() => setOpen(false)}
+            organizationId={organizationId}
+            isSuperAdmin={isSuperAdmin}
+            isOrgAdmin={isOrgAdmin}
+            currentUser={currentUser}
           />
         </div>
       </DialogContent>

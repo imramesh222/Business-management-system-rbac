@@ -1,16 +1,69 @@
 from rest_framework import viewsets, status, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from django.db.models import Q
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, BasePermission
 from apps.users.permissions import (
-    IsAdmin, IsSalesperson, IsSuperAdmin, HasOrganizationAccess
+    IsAdmin, IsSalesperson, HasOrganizationAccess, IsProjectManager
 )
 from .models import Client
 from .serializers import (
     ClientSerializer, ClientDetailSerializer, 
     ClientCreateSerializer, ClientUpdateSerializer
 )
+
+
+class HasOrganizationListAccess(BasePermission):
+    """
+    Custom permission for list actions that checks if the user has access to the organization
+    based on query parameters or their assigned organization.
+    """
+    def has_permission(self, request, view):
+        if not request.user or not request.user.is_authenticated:
+            print("Permission denied: User not authenticated")
+            return False
+            
+        print(f"Checking permission for user: {request.user.email} with role: {request.user.role}")
+            
+        # Allow superadmins to access all organizations
+        if request.user.role == 'superadmin':
+            print("Access granted: Superadmin")
+            return True
+            
+        # Get organization_id from query params
+        organization_id = request.query_params.get('organization_id')
+        print(f"Organization ID from query params: {organization_id}")
+        
+        # Check if user is a member of any organization
+        org_membership = request.user.organization_memberships.filter(is_active=True).first()
+
+        
+        # For admin users
+        if request.user.role == 'admin':
+            print("User is admin, checking access...")
+            if org_membership:
+                print(f"Found organization membership: {org_membership.organization_id} with role {org_membership.role}")
+                if not organization_id:
+                    print("Access granted: Admin with no specific org requested")
+                    return True
+                return str(org_membership.organization_id) == str(organization_id)
+            else:
+                print("No organization membership found for admin, but allowing access")
+                return True
+            
+        # For other roles
+        if org_membership:
+            print(f"User is member of organization: {org_membership.organization_id} with role {org_membership.role}")
+            if not organization_id:
+                return True
+            return str(org_membership.organization_id) == str(organization_id)
+            
+        # For roles that should have access without specific organization
+        if request.user.role in ['salesperson', 'project_manager']:
+            print(f"Access granted: {request.user.role} role")
+            return True
+            
+        print("Access denied: No matching conditions")
+        return False
 
 
 class ClientViewSet(viewsets.ModelViewSet):
@@ -28,15 +81,14 @@ class ClientViewSet(viewsets.ModelViewSet):
     ordering = ['name']
 
     def get_permissions(self):
-        """
-        Instantiates and returns the list of permissions that this view requires.
-        """
-        if self.action in ['list', 'retrieve']:
-            permission_classes = [IsAuthenticated]
-        elif self.action == 'create':
-            permission_classes = [IsAuthenticated, IsAdmin | IsSalesperson | IsSuperAdmin]
-        else:
+        if self.action == 'list':
+            permission_classes = [IsAuthenticated, HasOrganizationListAccess]
+        elif self.action == 'retrieve':
             permission_classes = [IsAuthenticated, HasOrganizationAccess]
+        elif self.action == 'create':
+            permission_classes = [IsAuthenticated, IsAdmin | IsSalesperson | IsProjectManager]
+        else:
+            permission_classes = [IsAdmin | IsSalesperson | IsProjectManager]
         return [permission() for permission in permission_classes]
 
     def get_serializer_class(self):

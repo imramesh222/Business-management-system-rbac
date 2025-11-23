@@ -1,127 +1,222 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useAuth } from '@/contexts/AuthContext';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { useRouter } from 'next/navigation';
 import { useToast } from '@/components/ui/use-toast';
+import { format } from 'date-fns';
+import { Calendar as CalendarIcon } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
+import { Calendar } from '@/components/ui/calendar';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Textarea } from '@/components/ui/textarea';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { apiGet, apiPost, apiPut } from '@/services/apiService';
-import { API_URL } from '@/constant';
-import { useOrganization } from '@/contexts/OrganizationContext';
 
 // Form validation schema
 const projectFormSchema = z.object({
-  title: z.string().min(3, 'Title must be at least 3 characters'),
+  name: z.string().min(3, 'Project name must be at least 3 characters'),
   description: z.string().min(10, 'Description must be at least 10 characters'),
   status: z.enum(['planning', 'in_progress', 'on_hold', 'completed', 'cancelled']),
-  cost: z.number().min(0, 'Cost cannot be negative'),
-  discount: z.number().min(0, 'Discount cannot be negative').optional(),
-  start_date: z.string().optional(),
-  deadline: z.string().optional(),
+  priority: z.enum(['low', 'medium', 'high']),
   client_id: z.string().min(1, 'Client is required'),
   project_manager_id: z.string().optional(),
+  start_date: z.date({
+    required_error: 'Start date is required',
+  }),
+  end_date: z.date().nullable(),
 });
 
 type ProjectFormValues = z.infer<typeof projectFormSchema>;
+
+interface User {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  organization_role?: string;
+  organization_id?: string;
+  organization_name?: string;
+  // Add these lines to support nested user objects
+  user?: {
+    id: string;
+    name: string;
+    email: string;
+  };
+}
+
+interface Client {
+  id: string;
+  name: string;
+  email: string;
+}
 
 interface ProjectFormProps {
   onSuccess?: () => void;
   onCancel?: () => void;
   initialData?: any;
+  organizationId: string;
+  isSuperAdmin?: boolean;
+  isOrgAdmin?: boolean;
+  currentUser?: User | null;
 }
 
-export function ProjectForm({ onSuccess, onCancel, initialData }: ProjectFormProps) {
+export function ProjectForm({ 
+  onSuccess, 
+  onCancel, 
+  initialData, 
+  organizationId: propOrganizationId, 
+  isSuperAdmin: propIsSuperAdmin = false,
+  isOrgAdmin: propIsOrgAdmin = false,
+  currentUser: propCurrentUser 
+}: ProjectFormProps) {
   const { toast } = useToast?.() || { toast: (props: any) => console.log('Toast:', props) };
   const router = useRouter();
-  const { currentOrganization } = useOrganization();
-  const [isLoading, setIsLoading] = useState(false);
-  const [clients, setClients] = useState<any[]>([]);
-  const [organizationUsers, setOrganizationUsers] = useState<any[]>([]);
+  const { user: authUser } = useAuth();
+  
+  // Use props with fallback to auth context
+  const currentUser = propCurrentUser || authUser;
+  const organizationId = propOrganizationId || currentUser?.organization_id;
+  const isSuperAdmin = propIsSuperAdmin || currentUser?.role === 'superadmin';
+  const isOrgAdmin = propIsOrgAdmin || currentUser?.organization_role === 'admin';
+  
+  const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [clients, setClients] = useState<Client[]>([]);
+  const [projectManagers, setProjectManagers] = useState<User[]>([]);
+  
+  // Debug mount
+  useEffect(() => {
+    console.log('ProjectForm mounted with:', {
+      propOrganizationId,
+      propIsSuperAdmin,
+      propIsOrgAdmin,
+      propCurrentUser,
+      authUser,
+      derivedValues: {
+        currentUser,
+        organizationId,
+        isSuperAdmin,
+        isOrgAdmin
+      }
+    });
+  }, [propOrganizationId, propIsSuperAdmin, propIsOrgAdmin, propCurrentUser, authUser, currentUser, organizationId, isSuperAdmin, isOrgAdmin]);
 
   const form = useForm<ProjectFormValues>({
     resolver: zodResolver(projectFormSchema),
-    defaultValues: initialData || {
-      title: '',
-      description: '',
-      status: 'planning',
-      cost: 0,
-      discount: 0,
-      start_date: '',
-      deadline: '',
-      client_id: '',
-      project_manager_id: '',
+    defaultValues: {
+      name: initialData?.name || '',
+      description: initialData?.description || '',
+      status: initialData?.status || 'planning',
+      priority: initialData?.priority || 'medium',
+      start_date: initialData?.start_date ? new Date(initialData.start_date) : new Date(),
+      end_date: initialData?.end_date ? new Date(initialData.end_date) : null,
+      client_id: initialData?.client_id || '',
+      project_manager_id: (!isSuperAdmin && !isOrgAdmin && currentUser?.id) ? currentUser.id : (initialData?.project_manager_id || '')
     },
   });
 
-  // Fetch clients and organization users when component mounts
+  // Debug logs
   useEffect(() => {
+    if (organizationId) {
+      console.log('ProjectForm debug:', {
+        isSuperAdmin,
+        isOrgAdmin,
+        hasProjectManagers: projectManagers.length > 0,
+        organizationId,
+        currentUser: {
+          id: currentUser?.id,
+          role: currentUser?.role,
+          organization_role: currentUser?.organization_role,
+          organization_id: currentUser?.organization_id
+        },
+        formValues: form.getValues()
+      });
+    }
+  }, [isSuperAdmin, isOrgAdmin, projectManagers, organizationId, currentUser, form]);
+
+  // Fetch clients and project managers
+  useEffect(() => {
+    if (!organizationId) {
+      console.error('Cannot fetch data: organizationId is not defined');
+      return;
+    }
+
     const fetchData = async () => {
       try {
-        if (!currentOrganization?.id) return;
+        setIsLoading(true);
+        console.log('Fetching data for organization:', organizationId);
         
         // Fetch clients
-        const clientsResponse = await apiGet<any>(`/clients/?organization=${currentOrganization.id}`);
-        console.log('Clients API Response:', clientsResponse);
-        
-        // Handle different response formats
-        let clientsData = [];
-        if (Array.isArray(clientsResponse)) {
-          clientsData = clientsResponse;
-        } else if (clientsResponse && typeof clientsResponse === 'object') {
-          // If response is an object with a results array
-          clientsData = clientsResponse.results || clientsResponse.data || [];
-        }
+        const clientsResponse = await apiGet(`/clients/`);
+        // Ensure we have an array, even if the response is an object with a results property
+        const clientsData = Array.isArray(clientsResponse) ? clientsResponse : (clientsResponse?.results || []);
+        console.log('Fetched clients:', clientsData);
         setClients(clientsData);
-        
-        // Fetch all organization users
-        const usersResponse = await apiGet<any>(`/organization/users/?organization=${currentOrganization.id}`);
-        console.log('Organization Users API Response:', usersResponse);
-        
-        // Handle different response formats
-        let usersData = [];
-        if (Array.isArray(usersResponse)) {
-          usersData = usersResponse;
-        } else if (usersResponse && typeof usersResponse === 'object') {
-          // If response is an object with a results array
-          usersData = usersResponse.results || usersResponse.data || [];
+
+        // If super admin or org admin, fetch project managers
+        if (isSuperAdmin || isOrgAdmin) {
+          console.log('Fetching project managers for org:', organizationId);
+          const pmsResponse = await apiGet(`/org/organizations/${organizationId}/members/?role=project_manager`);
+          // Debug logging
+          console.log('Project Managers API Response:', pmsResponse);
+          // Ensure we have an array, even if the response is an object with a results property
+          const pmsData = Array.isArray(pmsResponse) ? pmsResponse : (pmsResponse?.results || []);
+          console.log('Processed Project Managers Data:', pmsData);
+          setProjectManagers(pmsData);
         }
-        setOrganizationUsers(usersData);
-        
       } catch (error) {
-        console.error('Error fetching data:', error);
+        console.error('Error fetching form data:', error);
         toast({
           title: 'Error',
-          description: 'Failed to load required data',
+          description: 'Failed to load form data',
           variant: 'destructive',
         });
+      } finally {
+        setIsLoading(false);
       }
     };
 
     fetchData();
-  }, [currentOrganization, toast]);
+  }, [organizationId, isSuperAdmin, isOrgAdmin, toast]);
+
+  const startDate = form.watch('start_date');
+  const endDate = form.watch('end_date');
+
 
   const onSubmit = async (data: ProjectFormValues) => {
-    const url = initialData ? `/projects/projects/${initialData.id}/` : '/projects/projects/';
+    if (!organizationId) {
+      toast({
+        title: 'Error',
+        description: 'Organization ID is required',
+        variant: 'destructive',
+      });
+      return;
+    }
+    
+    const url = initialData ? `/projects/${initialData.id}` : '/projects';
+    const payload = {
+      ...data,
+      organization_id: organizationId,
+      // If not super admin and not org admin, set current user as project manager
+      project_manager_id: (!isSuperAdmin && !isOrgAdmin && currentUser?.id) ? currentUser.id : data.project_manager_id,
+      start_date: data.start_date.toISOString().split('T')[0],
+      end_date: data.end_date ? data.end_date.toISOString().split('T')[0] : null,
+    };
+    
+    console.log('Submitting project with payload:', payload);
     
     try {
-      setIsLoading(true);
-      
-      const payload = {
-        ...data,
-        cost: Number(data.cost),
-        discount: Number(data.discount) || 0,
-        // Ensure project_manager_id is sent as a string or null
-        project_manager_id: data.project_manager_id || null,
-      };
-
-      if (initialData) {
-        await apiPut(url, payload);
-      } else {
-        await apiPost(url, payload);
-      }
-      
+      setIsSubmitting(true);
+      const response = initialData 
+        ? await apiPut(url, payload)
+        : await apiPost(url, payload);
       toast({
         title: 'Success',
         description: `Project ${initialData ? 'updated' : 'created'} successfully`,
@@ -143,183 +238,233 @@ export function ProjectForm({ onSuccess, onCancel, initialData }: ProjectFormPro
   };
 
   return (
-    <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="space-y-2">
-          <label className="text-sm font-medium leading-none">
-            Title <span className="text-red-500">*</span>
-          </label>
-          <input
-            {...form.register('title')}
-            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-            placeholder="Project title"
-          />
-          {form.formState.errors.title && (
-            <p className="text-sm text-red-500">{form.formState.errors.title.message}</p>
-          )}
-        </div>
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h2 className="text-2xl font-bold">{initialData ? 'Edit' : 'New'} Project</h2>
+      </div>
 
-        <div className="space-y-2">
-          <label className="text-sm font-medium leading-none">Status</label>
-          <select
-            {...form.register('status')}
-            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <option value="planning">Planning</option>
-            <option value="in_progress">In Progress</option>
-            <option value="on_hold">On Hold</option>
-            <option value="completed">Completed</option>
-            <option value="cancelled">Cancelled</option>
-          </select>
-        </div>
+      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+          {/* Project Name */}
+          <div className="space-y-2">
+            <Label htmlFor="name">Project Name</Label>
+            <div className="relative">
+              <Input
+                id="name"
+                placeholder="Enter project name"
+                {...form.register('name')}
+                className={form.formState.errors.name ? 'border-red-500' : ''}
+              />
+              {form.formState.errors.name && (
+                <p className="mt-1 text-sm text-red-500">{form.formState.errors.name.message}</p>
+              )}
+            </div>
+          </div>
 
-        <div className="space-y-2">
-          <label className="text-sm font-medium leading-none">
-            Client <span className="text-red-500">*</span>
-          </label>
-          <select
-            {...form.register('client_id')}
-            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <option value="">Select a client</option>
-            {Array.isArray(clients) && clients.length > 0 ? (
-              clients.map((client) => (
-                <option key={client.id} value={client.id}>
-                  {client.name || `Client ${client.id}`}
-                </option>
-              ))
-            ) : (
-              <option disabled>No clients found</option>
+          {/* Client Selection */}
+          <div className="space-y-2">
+            <Label htmlFor="client_id">Client</Label>
+            <Select
+              onValueChange={(value) => form.setValue('client_id', value)}
+              value={form.watch('client_id') || ''}
+            >
+              <SelectTrigger className={form.formState.errors.client_id ? 'border-red-500' : ''}>
+                <SelectValue placeholder="Select a client" />
+              </SelectTrigger>
+              <SelectContent>
+                {clients.map((client) => (
+                  <SelectItem key={client.id} value={client.id}>
+                    {client.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {form.formState.errors.client_id && (
+              <p className="mt-1 text-sm text-red-500">{form.formState.errors.client_id.message}</p>
             )}
-          </select>
-          {form.formState.errors.client_id && (
-            <p className="text-sm text-red-500">{form.formState.errors.client_id.message}</p>
+          </div>
+
+          {/* Project Manager (for super admins and org admins) */}
+          {(isSuperAdmin || isOrgAdmin) && (
+            <div className="space-y-2">
+              <Label htmlFor="project_manager_id">
+                Project Manager
+                {projectManagers.length === 0 && (
+                  <span className="ml-2 text-sm text-yellow-600">
+                    (No project managers found in this organization)
+                  </span>
+                )}
+              </Label>
+              {projectManagers.length > 0 ? (
+                <Select
+                  onValueChange={(value) => form.setValue('project_manager_id', value)}
+                  value={form.watch('project_manager_id') || ''}
+                >
+                  <SelectTrigger className={form.formState.errors.project_manager_id ? 'border-red-500' : ''}>
+                    <SelectValue placeholder="Select a project manager" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {projectManagers.map((pm) => (
+                      <SelectItem key={pm.id} value={pm.id}>
+                        {pm.user?.name || pm.user?.email || pm.email || `User ${pm.id}`}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <div className="rounded-md border border-dashed p-4 text-sm text-gray-500">
+                  No project managers available in this organization. Please add project managers first.
+                </div>
+              )}
+              {form.formState.errors.project_manager_id && (
+                <p className="mt-1 text-sm text-red-500">
+                  {form.formState.errors.project_manager_id.message}
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* Status */}
+          <div className="space-y-2">
+            <Label htmlFor="status">Status</Label>
+            <Select
+              onValueChange={(value) => form.setValue('status', value as any)}
+              defaultValue={form.getValues('status')}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="planning">Planning</SelectItem>
+                <SelectItem value="in_progress">In Progress</SelectItem>
+                <SelectItem value="on_hold">On Hold</SelectItem>
+                <SelectItem value="completed">Completed</SelectItem>
+                <SelectItem value="cancelled">Cancelled</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Start Date */}
+          <div className="space-y-2">
+            <Label>Start Date</Label>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="outline"
+                  className={cn(
+                    "w-full justify-start text-left font-normal",
+                    !startDate && "text-muted-foreground"
+                  )}
+                >
+                  <CalendarIcon className="mr-2 h-4 w-4" />
+                  {startDate ? format(startDate, "PPP") : <span>Pick a date</span>}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="start">
+                <Calendar
+                  mode="single"
+                  selected={startDate}
+                  onSelect={(date) => date && form.setValue('start_date', date)}
+                  initialFocus
+                />
+              </PopoverContent>
+            </Popover>
+          </div>
+
+          {/* End Date */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <Label>End Date (Optional)</Label>
+              {endDate && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => form.setValue('end_date', null)}
+                  className="h-6 px-2 text-xs text-muted-foreground"
+                >
+                  Clear
+                </Button>
+              )}
+            </div>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="outline"
+                  className={cn(
+                    "w-full justify-start text-left font-normal",
+                    !endDate && "text-muted-foreground"
+                  )}
+                >
+                  <CalendarIcon className="mr-2 h-4 w-4" />
+                  {endDate ? format(endDate, "PPP") : <span>Pick a date</span>}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="start">
+                <Calendar
+                  mode="single"
+                  selected={endDate || undefined}
+                  onSelect={(date) => date && form.setValue('end_date', date)}
+                  initialFocus
+                />
+              </PopoverContent>
+            </Popover>
+          </div>
+
+          {/* Priority */}
+          <div className="space-y-2">
+            <Label htmlFor="priority">Priority</Label>
+            <Select
+              onValueChange={(value) => form.setValue('priority', value as any)}
+              defaultValue={form.getValues('priority')}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select priority" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="low">Low</SelectItem>
+                <SelectItem value="medium">Medium</SelectItem>
+                <SelectItem value="high">High</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        {/* Description */}
+        <div className="space-y-2">
+          <Label htmlFor="description">Description</Label>
+          <Textarea
+            id="description"
+            placeholder="Enter project description"
+            className="min-h-[120px]"
+            {...form.register('description')}
+          />
+          {form.formState.errors.description && (
+            <p className="text-sm text-red-500">{form.formState.errors.description.message}</p>
           )}
         </div>
 
-        <div className="space-y-2">
-          <label className="text-sm font-medium leading-none">Project Manager</label>
-          <select
-            {...form.register('project_manager_id')}
-            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+        <div className="flex justify-end space-x-4">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={onCancel || (() => router.back())}
             disabled={isSubmitting}
           >
-            <option value="">Select a project manager</option>
-            {Array.isArray(organizationUsers) && organizationUsers.length > 0 ? (
-              organizationUsers.map((user) => (
-                <option 
-                  key={user.id} 
-                  value={user.id}
-                  className="flex items-center"
-                >
-                  {user.user?.name || user.user?.email || `User ${user.id}`}
-                  {user.role && ` (${user.role.replace('_', ' ')})`}
-                </option>
-              ))
+            Cancel
+          </Button>
+          <Button type="submit" disabled={isSubmitting}>
+            {isSubmitting ? (
+              <>
+                <div className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                Creating...
+              </>
             ) : (
-              <option disabled>Loading users...</option>
+              'Create Project'
             )}
-          </select>
-          {form.formState.errors.project_manager_id && (
-            <p className="text-sm font-medium text-destructive">
-              {form.formState.errors.project_manager_id.message}
-            </p>
-          )}
+          </Button>
         </div>
-
-        <div className="space-y-2">
-          <label className="text-sm font-medium leading-none">
-            Cost ($) <span className="text-red-500">*</span>
-          </label>
-          <input
-            type="number"
-            step="0.01"
-            {...form.register('cost', { valueAsNumber: true })}
-            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-            placeholder="0.00"
-          />
-          {form.formState.errors.cost && (
-            <p className="text-sm text-red-500">{form.formState.errors.cost.message}</p>
-          )}
-        </div>
-
-        <div className="space-y-2">
-          <label className="text-sm font-medium leading-none">Discount ($)</label>
-          <input
-            type="number"
-            step="0.01"
-            {...form.register('discount', { valueAsNumber: true })}
-            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-            placeholder="0.00"
-          />
-          {form.formState.errors.discount && (
-            <p className="text-sm text-red-500">{form.formState.errors.discount.message}</p>
-          )}
-        </div>
-
-        <div className="space-y-2">
-          <label className="text-sm font-medium leading-none">Start Date</label>
-          <input
-            type="date"
-            {...form.register('start_date')}
-            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-          />
-        </div>
-
-        <div className="space-y-2">
-          <label className="text-sm font-medium leading-none">Deadline</label>
-          <input
-            type="date"
-            {...form.register('deadline')}
-            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-          />
-        </div>
-      </div>
-
-      <div className="space-y-2">
-        <label className="text-sm font-medium leading-none">
-          Description <span className="text-red-500">*</span>
-        </label>
-        <textarea
-          {...form.register('description')}
-          rows={4}
-          className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-          placeholder="Project description"
-        />
-        {form.formState.errors.description && (
-          <p className="text-sm text-red-500">{form.formState.errors.description.message}</p>
-        )}
-      </div>
-
-      <div className="flex justify-end space-x-4 pt-4">
-        <button
-          type="button"
-          onClick={onCancel}
-          disabled={isLoading}
-          className="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-10 px-4 py-2"
-        >
-          Cancel
-        </button>
-        <button 
-          type="submit" 
-          disabled={isLoading}
-          className="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-primary text-primary-foreground hover:bg-primary/90 h-10 px-4 py-2"
-        >
-          {isLoading ? (
-            <>
-              <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-              </svg>
-              {initialData ? 'Updating...' : 'Creating...'}
-            </>
-          ) : initialData ? (
-            'Update Project'
-          ) : (
-            'Create Project'
-          )}
-        </button>
-      </div>
-    </form>
+      </form>
+    </div>
   );
 }

@@ -2,14 +2,17 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Button } from '@/components/ui/button';
+import { Plus, Search, Filter } from 'lucide-react';
+import { useAuth } from '@/contexts/AuthContext';
 import { Input } from '@/components/ui/input';
-import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { NewProjectDialog } from '@/components/projects/NewProjectDialog';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Search, Filter, Plus } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
 import { fetchProjects } from '@/services/projectManagerService';
+import { useParams } from 'next/navigation';
 
 interface Project {
   id: string;
@@ -25,10 +28,14 @@ interface Project {
 }
 
 export default function ProjectsPage() {
+  const params = useParams();
+  const organizationId = params?.organizationId as string;
+
   const [projects, setProjects] = useState<Project[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const { user } = useAuth();
 
   useEffect(() => {
     const loadProjects = async () => {
@@ -39,7 +46,7 @@ export default function ProjectsPage() {
         setError('Failed to load projects');
         console.error(err);
       } finally {
-        setLoading(false);
+        setIsLoading(false);
       }
     };
 
@@ -63,7 +70,7 @@ export default function ProjectsPage() {
     return <Badge variant={statusInfo.variant}>{statusInfo.label}</Badge>;
   };
 
-  if (loading) {
+  if (isLoading) {
     return (
       <div className="p-6">
         <div className="animate-pulse space-y-4">
@@ -99,10 +106,17 @@ export default function ProjectsPage() {
           <h1 className="text-2xl font-bold">Projects</h1>
           <p className="text-sm text-gray-500">Manage and track your projects</p>
         </div>
-        <Button>
-          <Plus className="mr-2 h-4 w-4" />
-          New Project
-        </Button>
+        <NewProjectDialog 
+          organizationId={organizationId}
+          isSuperAdmin={user?.role === 'superadmin'}
+          isOrgAdmin={user?.organization_role === 'admin'}
+          currentUser={user}
+          onProjectCreated={() => {
+            // Refresh projects list when a new project is created
+            console.log('New project created, refresh projects list');
+            // Add project refresh logic here if needed
+          }} 
+        />
       </div>
 
       <div className="flex flex-col md:flex-row gap-4 mb-6">

@@ -155,7 +155,7 @@ export const parseJwt = (token: string): JwtPayload | null => {
 
 // Get current user from token
 export const getCurrentUser = (): User | null => {
-  // Return null on server side
+  // Don't run on server-side
   if (typeof window === 'undefined') return null;
   
   const token = getAccessToken();
@@ -166,56 +166,49 @@ export const getCurrentUser = (): User | null => {
     return null;
   }
   
-  const payload = parseJwt(token);
-  if (!payload) return null;
-  
-  console.log('[AUTH] Decoded JWT payload:', payload);
-  
-  // Determine the user's role, prioritizing organization_role over role
-  const roleFromToken = (payload.organization_role || payload.role || 'user').toLowerCase();
-  const userRole = (['superadmin', 'admin', 'developer', 'project_manager', 'verifier', 'salesperson', 'support', 'user'].includes(roleFromToken) 
-    ? roleFromToken 
-    : 'user') as UserRole;
-  
-  // Map JWT payload to User interface
-  const user: User = {
-    id: payload.user_id || payload.sub || `user-${Date.now()}`,
-    name: payload.name || payload.email?.split('@')[0] || 'User',
-    email: payload.email || '',
-    role: userRole,
-    avatar: payload.email?.charAt(0).toUpperCase() || 'U',
-    is_staff: payload.is_staff || false,
-    is_superuser: payload.is_superuser || false,
-    organization_role: userRole,
-    // Map organization fields
-    organization_id: payload.organization_id,
-    organization_name: payload.organization_name,
-    // Also include organization object for backward compatibility
-    organization: payload.organization_id ? {
-      id: payload.organization_id,
-      name: payload.organization_name || 'Organization'
-    } : undefined
-  };
+  try {
+    // Get user data from token
+    const payload = parseJwt(token);
+    if (!payload) return null;
 
-  // Add organization details if available in the token
-  if (payload.organization_id || payload.organization_name) {
-    user.organization = {
-      id: String(payload.organization_id || ''),
-      name: String(payload.organization_name || 'Unknown Organization')
+    // Map JWT payload to User interface
+    const user: User = {
+      id: payload.user_id || payload.sub || `user-${Date.now()}`,
+      name: payload.name || payload.email?.split('@')[0] || 'User',
+      email: payload.email || '',
+      first_name: payload.first_name || payload.name?.split(' ')[0] || '',
+      last_name: payload.last_name || payload.name?.split(' ').slice(1).join(' ') || '',
+      phone: payload.phone || '',
+      timezone: payload.timezone || 'UTC',
+      role: (payload.role || 'user') as UserRole,
+      avatar: payload.avatar || payload.email?.charAt(0).toUpperCase() || 'U',
+      is_staff: payload.is_staff || false,
+      is_superuser: payload.is_superuser || false,
+      organization_role: (payload.organization_role || payload.role || 'user') as UserRole,
+      organization_id: payload.organization_id,
+      organization_name: payload.organization_name,
+      organization: payload.organization_id ? {
+        id: payload.organization_id,
+        name: payload.organization_name || 'Organization'
+      } : undefined,
+      permissions: payload.permissions || []
     };
     
-    // If we have an organization role in the token, use it
-    if (payload.organization_role) {
-      const orgRole = payload.organization_role.toLowerCase();
-      if (['superadmin', 'admin', 'developer', 'project_manager', 'verifier', 'salesperson', 'support', 'user'].includes(orgRole)) {
-        user.organization_role = orgRole as UserRole;
-      }
+    // Add organization details if available in the token
+    if (payload.organization) {
+      user.organization = {
+        id: payload.organization.id || payload.organization_id,
+        name: payload.organization.name || payload.organization_name
+      };
     }
+    
+    console.log('[AUTH] Processed user object:', user);
+    return user;
+    
+  } catch (error) {
+    console.error('Error getting current user:', error);
+    return null;
   }
-  
-  console.log('[AUTH] Processed user object:', user);
-
-  return user;
 };
 
 // Mock user for development (remove in production)
@@ -224,12 +217,21 @@ export const getMockUser = (): User => {
     id: 1,
     name: 'Admin User',
     email: 'admin@example.com',
+    first_name: 'Admin',
+    last_name: 'User',
+    phone: '+1234567890',
+    timezone: 'UTC',
     role: 'superadmin',
     avatar: 'A',
     organization: {
       id: '1',
       name: 'Example Corp'
-    }
+    },
+    organization_id: '1',
+    organization_name: 'Example Corp',
+    is_staff: true,
+    is_superuser: true,
+    permissions: []
   };
 };
 

@@ -47,6 +47,7 @@ const isUserRole = (role: string): role is UserRole => {
 
 interface RoleBasedLayoutProps {
   children: React.ReactNode;
+  userRole?: UserRole;
 }
 
 const getNavigationForRole = (role: UserRole) => {
@@ -81,6 +82,7 @@ const getNavigationForRole = (role: UserRole) => {
     admin: [
       { name: 'Members', href: '/organization/members', icon: Users, current: false },
       { name: 'Projects', href: '/organization/projects', icon: FolderOpen, current: false },
+      { name: 'Clients', href: '/clients', icon: Users, current: false },
       { name: 'Billing', href: '/organization/billing', icon: DollarSign, current: false },
       { name: 'Settings', href: '/organization/settings', icon: Settings, current: false },
       { name: 'Reports', href: '/organization/reports', icon: BarChart3, current: false },
@@ -130,6 +132,7 @@ const getNavigationForRole = (role: UserRole) => {
     project_manager: [
       { name: 'Dashboard', href: '/manager/dashboard', icon: Home, current: true },
       { name: 'Projects', href: '/manager/projects', icon: FolderOpen, current: false },
+      { name: 'Clients', href: '/clients', icon: Users, current: false },
       { name: 'Tasks', href: '/manager/tasks', icon: CheckSquare, current: false },
       { name: 'Team', href: '/manager/team', icon: Users, current: false },
       { name: 'Calendar', href: '/manager/calendar', icon: Calendar, current: false },
@@ -151,7 +154,7 @@ const getNavigationForRole = (role: UserRole) => {
   return [...baseNavigation, ...roleNav];
 };
 
-export function RoleBasedLayout({ children }: RoleBasedLayoutProps) {
+export function RoleBasedLayout({ children, userRole: propUserRole }: RoleBasedLayoutProps) {
   const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const pathname = usePathname();
@@ -179,6 +182,7 @@ export function RoleBasedLayout({ children }: RoleBasedLayoutProps) {
 
   // Safely get the user's role
   const getUserRole = (): UserRole => {
+    if (propUserRole) return propUserRole;  // Use prop if provided
     const role = (user.organization_role || user.role || 'user').toLowerCase();
     return isUserRole(role) ? role : 'user';
   };

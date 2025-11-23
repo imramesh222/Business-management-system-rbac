@@ -298,7 +298,7 @@ export function SalesOverview() {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <Button className="h-20 flex-col space-y-2">
               <Users className="h-6 w-6" />
-              <span>Add Client</span>
+              <span>Add New Client</span>
             </Button>
             <Button variant="outline" className="h-20 flex-col space-y-2">
               <DollarSign className="h-6 w-6" />

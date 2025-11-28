@@ -1,10 +1,23 @@
 from rest_framework import permissions
-from .models import OrganizationRoleChoices
+from .models import OrganizationRoleChoices, OrganizationMember
 from .utils import (
     has_organization_permission,
     get_user_organization_role,
     get_organization_role_choices
 )
+
+
+class HasOrganizationListAccess(permissions.BasePermission):
+    """
+    Allows access to users who are members of any organization.
+    """
+    def has_permission(self, request, view):
+        # Superusers have all permissions
+        if request.user.is_superuser:
+            return True
+            
+        # Check if user is a member of any organization
+        return OrganizationMember.objects.filter(user=request.user).exists()
 
 class IsOrganizationMember(permissions.BasePermission):
     """

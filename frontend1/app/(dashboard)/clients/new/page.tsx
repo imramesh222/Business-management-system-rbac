@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/components/ui/use-toast';
 import { ArrowLeft } from 'lucide-react';
+import { apiPost } from '@/services/apiService';
 
 export default function NewClientPage() {
   const router = useRouter();
@@ -19,41 +20,39 @@ export default function NewClientPage() {
     address: '',
   });
 
+
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsLoading(true);
+  e.preventDefault();
+  setIsLoading(true);
 
-    try {
-      const response = await fetch('/api/v1/clients/', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(formData),
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to create client');
-      }
-
-      toast({
-        title: 'Success',
-        description: 'Client created successfully',
-      });
-      
-      // Redirect back to clients list
-      router.push('/clients');
-    } catch (error) {
-      console.error('Error creating client:', error);
-      toast({
-        title: 'Error',
-        description: 'Failed to create client',
-        variant: 'destructive',
-      });
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  try {
+    const payload = {
+      ...formData,
+      organization: '9cec81f7-eea8-4ac0-8ebe-2f8d6ffe7bc2' // The organization ID
+    };
+    
+    // Log the payload for debugging
+    console.log('Sending payload:', payload);
+    
+    await apiPost('/clients/', payload);
+    
+    toast({
+      title: 'Success',
+      description: 'Client created successfully',
+    });
+    
+    router.push('/clients');
+  } catch (error: any) {
+    console.error('Error creating client:', error);
+    toast({
+      title: 'Error',
+      description: error.message || 'Failed to create client',
+      variant: 'destructive',
+    });
+  } finally {
+    setIsLoading(false);
+  }
+};
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
@@ -66,11 +65,11 @@ export default function NewClientPage() {
   return (
     <div className="space-y-6 p-6">
       <div className="flex items-center space-x-4">
-        <Button 
-          variant="outline" 
-          size="icon" 
+        <Button
+          variant="outline"
+          size="icon"
           onClick={() => router.back()}
-          className="h-8 w-8" 
+          className="h-8 w-8"
         >
           <ArrowLeft className="h-4 w-4" />
         </Button>

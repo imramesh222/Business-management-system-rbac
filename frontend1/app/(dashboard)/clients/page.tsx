@@ -15,6 +15,7 @@ import { getCurrentUser, getAccessToken } from '@/lib/auth';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import router from 'next/router';
 
 // Client form component
 const AddClientForm = ({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) => {
@@ -47,36 +48,40 @@ const AddClientForm = ({ onClose, onSuccess }: { onClose: () => void; onSuccess:
     { value: 'other', label: 'Other' },
   ];
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
+// In your handleSubmit function
+const handleSubmit = async (e: React.FormEvent) => {
+  e.preventDefault();
+  setLoading(true);
 
-    try {
-      const token = getAccessToken();
-      if (!token) {
-        throw new Error('Authentication required');
-      }
-
-      const response = await apiPost('/clients/', formData);
-      
-      toast({
-        title: 'Success',
-        description: 'Client created successfully',
-      });
-      
-      onSuccess();
-      onClose();
-    } catch (error) {
-      console.error('Error creating client:', error);
-      toast({
-        title: 'Error',
-        description: 'Failed to create client',
-        variant: 'destructive',
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
+  try {
+    const payload = {
+      ...formData,
+      organization: '9cec81f7-eea8-4ac0-8ebe-2f8d6ffe7bc2'
+    };
+    
+    console.log('Sending payload:', JSON.stringify(payload, null, 2));
+    
+    // Make the API call
+    const response = await apiPost('/clients/', payload);
+    console.log('API Response:', response);
+    
+    toast({
+      title: 'Success',
+      description: 'Client created successfully',
+    });
+    
+    router.push('/clients');
+  } catch (error: any) {
+    console.error('Error creating client:', error);
+    toast({
+      title: 'Error',
+      description: error.message || 'Failed to create client',
+      variant: 'destructive',
+    });
+  } finally {
+    setLoading(false);
+  }
+};
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
@@ -223,7 +228,7 @@ const ClientsPage = () => {
   useEffect(() => {
     console.log('=== AUTH DEBUG ===');
     console.log('LocalStorage user:', localStorage.getItem('user'));
-    
+
     const userData = getCurrentUser();
     console.log('Current user from getCurrentUser():', {
       id: userData?.id,
@@ -235,7 +240,7 @@ const ClientsPage = () => {
       isSalesperson: userData?.role === 'salesperson',
       isProjectManager: userData?.role === 'project_manager'
     });
-    
+
     // Check token
     const token = localStorage.getItem('token');
     console.log('Auth token exists:', !!token);
@@ -272,7 +277,7 @@ const ClientsPage = () => {
 
   useEffect(() => {
     fetchClients();
-    
+
     const userData = getCurrentUser();
     console.log('Current user data:', userData); // Debug log
     setUser(userData);
@@ -288,20 +293,20 @@ const ClientsPage = () => {
       try {
         setLoading(true);
         console.log('Fetching clients for org:', user.organization_id);
-        
+
         // Use the correct clients endpoint with organization_id as a query parameter
         const endpoint = `/clients/?organization_id=${user.organization_id}`;
         console.log('Fetching clients from endpoint:', endpoint);
-        
+
         const data = await apiGet<Client[]>(endpoint);
         console.log('Clients data:', data);
 
         setClients(Array.isArray(data) ? data : []);
-        
+
       } catch (error: any) {
         console.error('Error in fetchClients:', error);
         setError('Failed to load clients. Please check your permissions.');
-        
+
         if (error?.response?.status === 403) {
           toast({
             title: 'Access Denied',
@@ -342,8 +347,8 @@ const ClientsPage = () => {
     return (
       <div className="space-y-4 p-4">
         <div className="text-destructive">{error}</div>
-        <Button 
-          variant="outline" 
+        <Button
+          variant="outline"
           onClick={() => window.location.reload()}
           className="mt-2"
         >
@@ -386,9 +391,9 @@ const ClientsPage = () => {
                 <span className="sr-only">Close</span>
               </Button> */}
             </DialogHeader>
-            <AddClientForm 
-              onClose={() => setIsFormOpen(false)} 
-              onSuccess={handleClientAdded} 
+            <AddClientForm
+              onClose={() => setIsFormOpen(false)}
+              onSuccess={handleClientAdded}
             />
           </DialogContent>
         </Dialog>

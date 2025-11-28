@@ -1,33 +1,68 @@
 from rest_framework import serializers
-from .models import Client
+from apps.clients.models import Client  # Updated import
 from apps.organization.models import Organization
 from apps.users.serializers import UserSerializer
+from apps.projects.serializers import ClientSerializer  # Updated import
 
-
-class ClientSerializer(serializers.ModelSerializer):
-    """Basic client serializer for list and create operations."""
-    organization_name = serializers.CharField(source='organization.name', read_only=True)
-    salesperson_name = serializers.SerializerMethodField()
+class ClientCreateSerializer(ClientSerializer):
+    """Serializer for client creation with additional validation."""
+    organization = serializers.PrimaryKeyRelatedField(
+        queryset=Organization.objects.all(),
+        required=True,
+        write_only=True
+    )
     
-    class Meta:
-        model = Client
-        fields = [
-            'id', 'name', 'contact_person', 'email', 'phone', 'address', 
-            'city', 'state', 'country', 'postal_code', 'status', 'source',
-            'created_at', 'updated_at', 'organization', 'salesperson',
-            'organization_name', 'salesperson_name'
-        ]
-        read_only_fields = ['id', 'created_at', 'updated_at', 'organization_name', 'salesperson_name']
-        ref_name = 'clients.Client'  # Unique ref_name to avoid conflicts
+    class Meta(ClientSerializer.Meta):
+        fields = ['organization'] + [f for f in ClientSerializer.Meta.fields 
+                 if f not in ['id', 'created_at', 'updated_at', 'organization_name', 'salesperson_name']]
         extra_kwargs = {
-            'name': {'required': True},
-            'email': {'required': True},
-            'organization': {'required': True},
+            'organization': {'required': True, 'write_only': True}
         }
     
-    def get_salesperson_name(self, obj):
-        return str(obj.salesperson) if obj.salesperson else None
-
+    def validate(self, data):
+        """
+        Additional validation for client creation.
+        - Ensure the organization is provided and active
+        - If salesperson is provided, ensure they belong to the same organization
+        """
+        organization = data.get('organization')
+        salesperson = data.get('salesperson')
+        user = self.context['request'].user
+        
+        if not organization:
+            raise serializers.ValidationError({
+                'organization': ['This field is required.']
+            })
+        
+        # Ensure the organization exists and is active
+        if not organization or not hasattr(organization, 'is_active') or not organization.is_active:
+            raise serializers.ValidationError({
+                'organization': ['Cannot assign to an inactive or invalid organization.']
+            })
+        
+        # If user is admin, they can create clients for their organization
+        if hasattr(user, 'admin') and user.admin.organization:
+            if organization != user.admin.organization:
+                raise serializers.ValidationError({
+                    'organization': ['You can only create clients for your own organization.']
+                })
+        
+        # If user is salesperson, they can only create clients for their organization
+        elif hasattr(user, 'salesperson') and user.salesperson.organization:
+            if organization != user.salesperson.organization:
+                raise serializers.ValidationError({
+                    'organization': ['You can only create clients for your own organization.']
+                })
+            # Auto-assign the salesperson if not provided
+            if not salesperson:
+                data['salesperson'] = user.salesperson
+        
+        if salesperson and (not hasattr(salesperson, 'organization') or salesperson.organization != organization):
+            raise serializers.ValidationError({
+                'salesperson': ['The salesperson must belong to the same organization.']
+            })
+            
+        return data
 
 class ClientDetailSerializer(ClientSerializer):
     """Detailed client serializer with related fields."""
@@ -58,34 +93,6 @@ class ClientDetailSerializer(ClientSerializer):
     def get_total_value(self, obj):
         # This will need to be updated once the Project model is properly set up
         return 0
-
-
-class ClientCreateSerializer(ClientSerializer):
-    """Serializer for client creation with additional validation."""
-    class Meta(ClientSerializer.Meta):
-        fields = [f for f in ClientSerializer.Meta.fields 
-                 if f not in ['id', 'created_at', 'updated_at', 'organization_name', 'salesperson_name']]
-    
-    def validate(self, data):
-        """
-        Additional validation for client creation.
-        - Ensure the organization is active
-        - If salesperson is provided, ensure they belong to the same organization
-        """
-        organization = data.get('organization')
-        salesperson = data.get('salesperson')
-        
-        if not organization.is_active:
-            raise serializers.ValidationError({
-                'organization': 'Cannot assign to an inactive organization.'
-            })
-            
-        if salesperson and salesperson.organization != organization:
-            raise serializers.ValidationError({
-                'salesperson': 'The salesperson must belong to the same organization.'
-            })
-            
-        return data
 
 
 class ClientUpdateSerializer(ClientSerializer):

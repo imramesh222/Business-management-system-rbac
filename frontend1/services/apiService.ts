@@ -1,5 +1,6 @@
 import axios, { AxiosRequestConfig, AxiosResponse, AxiosError } from 'axios';
 import { API_URL } from '@/constant';
+import { getAccessToken } from '@/lib/auth';
 // Create axios instance with base URL from environment variables
 const api = axios.create({
   baseURL: API_URL,
@@ -27,13 +28,12 @@ const processQueue = (error: any, token: string | null = null) => {
 // Request interceptor to add auth token to requests
 api.interceptors.request.use(
   async (config) => {
-    // Only run this in the browser
     if (typeof window === 'undefined') {
       return config;
     }
 
-    // Add auth token if available
     const token = localStorage.getItem('access_token');
+    console.log('Using token:', token); // Debug log
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
@@ -134,8 +134,20 @@ export const apiPost = async <T = any>(
   data?: any,
   config?: AxiosRequestConfig
 ): Promise<T> => {
-  const response = await api.post<T>(url, data, config);
-  return response.data;
+  try {
+    const response = await api.post<T>(url, data, {
+      ...config,
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        ...(config?.headers || {}),
+      },
+    });
+    return response.data;
+  } catch (error) {
+    console.error('API POST Error:', error);
+    throw error;
+  }
 };
 
 export const apiPut = async <T = any>(

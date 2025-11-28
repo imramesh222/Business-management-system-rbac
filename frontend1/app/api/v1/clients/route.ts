@@ -1,48 +1,55 @@
+// app/api/v1/clients/route.ts
 import { NextResponse } from 'next/server';
-import { getAccessToken } from '@/lib/auth';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth-options';
 
-// Create a new client
-// This is a client-side API route that will be called from the frontend
-// It will forward the request to your backend API with the proper authentication
-
-export async function POST(request: Request) {
+export async function POST(req: Request) {
   try {
-    const token = getAccessToken();
+    const session = await getServerSession(authOptions);
     
-    if (!token) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      );
+    if (!session?.user) {
+      return new NextResponse('Unauthorized', { status: 401 });
     }
 
-    const body = await request.json();
-    const apiUrl = `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/v1/clients/`;
+    const body = await req.json();
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
     
-    const response = await fetch(apiUrl, {
+    // Verify the user has an organization ID
+    if (!session.user.organization_id) {
+      return new NextResponse('User is not associated with an organization', { 
+        status: 400 
+      });
+    }
+
+    // Add organization_id to the request payload
+    const payload = {
+      ...body,
+      organization_id: session.user.organization_id
+    };
+
+    const response = await fetch(`${apiUrl}/api/v1/clients/`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
+        'Authorization': `Bearer ${session.user.access_token || session.user.token}`
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify(payload)
     });
 
-    const data = await response.json();
-
     if (!response.ok) {
-      return NextResponse.json(
-        { error: data.detail || 'Failed to create client' },
+      const errorData = await response.json().catch(() => ({}));
+      console.error('Backend error:', errorData);
+      return new NextResponse(
+        errorData.detail || 'Failed to create client', 
         { status: response.status }
       );
     }
 
+    const data = await response.json();
     return NextResponse.json(data);
+    
   } catch (error) {
-    console.error('Error creating client:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    console.error('Error in API route:', error);
+    return new NextResponse('Internal server error', { status: 500 });
   }
 }

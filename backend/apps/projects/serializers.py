@@ -10,7 +10,7 @@ from apps.organization.models import OrganizationMember
 class ClientSerializer(serializers.ModelSerializer):
     class Meta:
         model = Client
-        fields = ['id', 'name', 'contact', 'salesperson']
+        fields = ['id', 'name', 'contact_person', 'salesperson']
         read_only_fields = ['id']
         ref_name = 'projects.Client'  # Unique ref_name to avoid conflicts
 

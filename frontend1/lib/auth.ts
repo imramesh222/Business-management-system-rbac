@@ -2,8 +2,11 @@
 export type UserRole = 'superadmin' | 'admin' | 'developer' | 'project_manager' | 'verifier' | 'salesperson' | 'support' | 'user';
 
 // Token storage keys
-const ACCESS_TOKEN_KEY = 'access_token';
-const REFRESH_TOKEN_KEY = 'refresh_token';
+export const ACCESS_TOKEN_KEY = 'access_token';
+export const REFRESH_TOKEN_KEY = 'refresh_token';
+
+// API URL
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
 
 // JWT token type
 export interface JwtPayload {

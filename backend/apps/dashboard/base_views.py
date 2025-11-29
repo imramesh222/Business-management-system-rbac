@@ -515,11 +515,11 @@ class OrganizationAdminDashboardView(BaseDashboardView):
                 'type': 'project_update',
                 'project': {
                     'id': str(project.id),
-                    'name': project.name,
+                    'title': project.title,
                     'status': project.status
                 },
                 'timestamp': project.updated_at.isoformat(),
-                'message': f"Project '{project.name}' was updated"
+                'message': f"Project '{project.title}' was updated"
             })
         
         # Sort by timestamp and return limited results

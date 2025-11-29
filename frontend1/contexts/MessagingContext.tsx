@@ -409,20 +409,29 @@ export const MessagingProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           };
         })
         .filter(user => {
-          // Make filtering more lenient - only filter out the current user
-          // and users with no ID or email
-          const isValid = !!user.id && !!user.email && user.id !== currentUserId;
+          // Only filter out the current user
+          const isCurrentUser = user.id === currentUserId;
+          
+          // Log detailed info about each user for debugging
+          const userInfo = {
+            id: user.id,
+            email: user.email,
+            isCurrentUser,
+            hasId: !!user.id,
+            hasEmail: !!user.email,
+            name: user.name || `${user.first_name} ${user.last_name}`.trim()
+          };
 
+          console.log('Processing user:', userInfo);
+          
+          // Only filter out the current user, be permissive with other fields
+          // since they might not all be required for messaging
+          const isValid = !isCurrentUser;
+          
           if (!isValid) {
-            console.warn('Filtering out user due to missing fields or current user:', {
-              id: user.id,
-              email: user.email,
-              isCurrentUser: user.id === currentUserId,
-              hasId: !!user.id,
-              hasEmail: !!user.email,
-              userObject: user
-            });
+            console.log('Filtering out current user:', userInfo);
           }
+          
           return isValid;
         });
 

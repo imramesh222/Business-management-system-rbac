@@ -406,3 +406,4 @@ SWAGGER_SETTINGS = {
 # Disable CSRF for API views
 CSRF_COOKIE_HTTPONLY = False  # Allow JavaScript to read the CSRF token
 CSRF_USE_SESSIONS = False
+CSRF_HEADER_NAME = 'HTTP_X_CSRFTOKEN'

@@ -1,4 +1,4 @@
-import { apiGet, apiPost } from './apiService';
+import { apiGet, apiPost, apiPut } from './apiService';
 import { 
   Organization, 
   OrganizationListItem as OrgListItem,
@@ -637,7 +637,7 @@ export const fetchOrganizationDetails = async (orgId: string): Promise<Organizat
     const now = new Date().toISOString();
     return {
       id: orgId,
-      name: 'Unknown Organization',
+      name: 'Enter Organization Name',
       slug: 'unknown',
       is_active: true,
       created_at: now,
@@ -902,6 +902,24 @@ export const createOrganization = async (data: {
   } catch (error) {
     console.error('Error creating organization:', error);
     throw new Error('Failed to create organization');
+  }
+};
+
+/**
+ * Updates an existing organization
+ * @param orgId - The ID of the organization to update
+ * @param data - The updated organization data
+ */
+export const updateOrganization = async (
+  orgId: string,
+  data: Partial<Organization>
+): Promise<Organization> => {
+  try {
+    const response = await apiPut<Organization>(`/org/organizations/${orgId}/`, data);
+    return response;
+  } catch (error) {
+    console.error('Error updating organization:', error);
+    throw new Error('Failed to update organization');
   }
 };
 

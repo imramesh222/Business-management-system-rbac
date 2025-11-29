@@ -1,6 +1,59 @@
 import axios, { AxiosRequestConfig, AxiosResponse, AxiosError } from 'axios';
 import { API_URL } from '@/constant';
-import { getAccessToken } from '@/lib/auth';
+import { getAccessToken, getRefreshToken, clearAuthToken } from '@/lib/auth';
+import { useRouter } from 'next/navigation';
+
+// Function to refresh the access token using the refresh token
+const refreshAccessToken = async (): Promise<string | null> => {
+  try {
+    console.log('[Auth] Attempting to refresh access token');
+    // Try to get refresh token from auth service first, then fallback to localStorage
+    const refreshToken = getRefreshToken() || localStorage.getItem('refresh_token');
+    
+    if (!refreshToken) {
+      console.warn('[Auth] No refresh token available');
+      throw new Error('No refresh token available');
+    }
+
+    console.log('[Auth] Sending refresh token request');
+    const response = await fetch(`${API_URL}/token/refresh/`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ refresh: refreshToken.trim() }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`[Auth] Failed to refresh token: ${response.status} - ${errorText}`);
+      throw new Error('Failed to refresh token');
+    }
+
+    const data = await response.json();
+    if (data.access) {
+      console.log('[Auth] Token refresh successful');
+      // Store tokens in both locations for compatibility
+      localStorage.setItem('access_token', data.access);
+      localStorage.setItem('Token', data.access);
+      
+      if (data.refresh) {
+        console.log('[Auth] Storing new refresh token');
+        localStorage.setItem('refresh_token', data.refresh);
+      }
+      
+      return data.access;
+    }
+    return null;
+  } catch (error) {
+    console.error('[Auth] Error in refreshAccessToken:', error);
+    clearAuthToken();
+    if (typeof window !== 'undefined') {
+      window.location.href = '/login';
+    }
+    return null;
+  }
+};
 // Create axios instance with base URL from environment variables
 const api = axios.create({
   baseURL: API_URL,
@@ -26,21 +79,33 @@ const processQueue = (error: any, token: string | null = null) => {
 };
 
 // Request interceptor to add auth token to requests
-api.interceptors.request.use(
-  async (config) => {
-    if (typeof window === 'undefined') {
-      return config;
+api.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const originalRequest = error.config;
+    
+    // If error is 401 and we haven't tried to refresh yet
+    if (error.response?.status === 401 && !originalRequest._retry) {
+      originalRequest._retry = true;
+      
+      try {
+        console.log('[API] Attempting to refresh token...');
+        const newToken = await refreshAccessToken();
+        
+        if (newToken) {
+          console.log('[API] Token refreshed, retrying request');
+          originalRequest.headers.Authorization = `Bearer ${newToken}`;
+          return api(originalRequest);
+        }
+      } catch (refreshError) {
+        console.error('[API] Error refreshing token:', refreshError);
+        // If refresh fails, redirect to login
+        if (typeof window !== 'undefined') {
+          window.location.href = '/login';
+        }
+      }
     }
-
-    const token = localStorage.getItem('access_token');
-    console.log('Using token:', token); // Debug log
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
-
-    return config;
-  },
-  (error) => {
+    
     return Promise.reject(error);
   }
 );
@@ -51,10 +116,10 @@ api.interceptors.response.use(
   async (error: AxiosError) => {
     const originalRequest = error.config as any;
     
-    // If the error is 401 and we haven't tried to refresh yet
+    // If the error is 401 and we haven't already tried to refresh the token
     if (error.response?.status === 401 && !originalRequest._retry) {
+      // If we're already refreshing, wait for the new token
       if (isRefreshing) {
-        // If we're already refreshing, queue the request
         return new Promise((resolve, reject) => {
           failedQueue.push({ resolve, reject });
         })

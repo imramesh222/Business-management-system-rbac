@@ -15,7 +15,8 @@ import {
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { format } from 'date-fns';
-import { Loader2, AlertCircle, CheckCircle, Clock, Users, Calendar, DollarSign } from 'lucide-react';
+import { Loader2, AlertCircle, CheckCircle, Clock, Users, Calendar, DollarSign, List } from 'lucide-react';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 interface Project {
   id: string;
@@ -53,7 +54,9 @@ interface ProjectListProps {
 }
 
 export function ProjectList({ organizationId, isSuperAdmin = false }: ProjectListProps) {
-  const [projects, setProjects] = useState<Project[]>([]);
+  const [allProjects, setAllProjects] = useState<Project[]>([]);
+  const [filteredProjects, setFilteredProjects] = useState<Project[]>([]);
+  const [activeFilter, setActiveFilter] = useState<string>('all');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -61,17 +64,18 @@ export function ProjectList({ organizationId, isSuperAdmin = false }: ProjectLis
     const fetchProjects = async () => {
       try {
         setLoading(true);
-        let url = `${API_URL}/projects/projects/`;
+        let url = `${API_URL}/projects/`;
         
         // If organizationId is provided, filter projects by organization
         if (organizationId) {
-          url = `${API_URL}/projects/projects/?organization=${organizationId}`;
+          url = `${API_URL}/projects/?organization=${organizationId}`;
         }
         
         const response = await apiGet(url);
-        // Ensure we have an array, even if the response is an object
-        const projectsData = Array.isArray(response) ? response : [];
-        setProjects(projectsData);
+        // Handle both paginated response and direct array response
+        const projectsData = response?.results || (Array.isArray(response) ? response : []);
+        setAllProjects(projectsData);
+        setFilteredProjects(projectsData); // Initialize with all projects
       } catch (err) {
         console.error('Error fetching projects:', err);
         setError('Failed to load projects. Please try again later.');
@@ -82,6 +86,15 @@ export function ProjectList({ organizationId, isSuperAdmin = false }: ProjectLis
 
     fetchProjects();
   }, [organizationId]);
+
+  // Filter projects based on active filter
+  useEffect(() => {
+    if (activeFilter === 'all') {
+      setFilteredProjects(allProjects);
+    } else {
+      setFilteredProjects(allProjects.filter(project => project.status === activeFilter));
+    }
+  }, [activeFilter, allProjects]);
 
   const getStatusBadge = (status: string) => {
     const statusMap: Record<string, { variant: 'default' | 'secondary' | 'destructive' | 'outline', label: string }> = {
@@ -126,7 +139,15 @@ export function ProjectList({ organizationId, isSuperAdmin = false }: ProjectLis
     );
   }
 
-  if (projects.length === 0) {
+  const projectTabs = [
+    { value: 'all', label: 'All Projects', icon: <List className="w-4 h-4 mr-1" /> },
+    { value: 'in_progress', label: 'Active', icon: <Clock className="w-4 h-4 mr-1" /> },
+    { value: 'completed', label: 'Completed', icon: <CheckCircle className="w-4 h-4 mr-1" /> },
+    { value: 'on_hold', label: 'On Hold', icon: <AlertCircle className="w-4 h-4 mr-1" /> },
+    { value: 'planning', label: 'Planning', icon: <AlertCircle className="w-4 h-4 mr-1" /> },
+  ];
+
+  if (allProjects.length === 0) {
     return (
       <div className="p-8 text-center text-muted-foreground">
         <p>No projects found.</p>
@@ -138,8 +159,30 @@ export function ProjectList({ organizationId, isSuperAdmin = false }: ProjectLis
   }
 
   return (
-    <div className="rounded-md border">
-      <Table>
+    <div className="space-y-4">
+      <div className="mb-4">
+        <Tabs 
+          value={activeFilter} 
+          onValueChange={setActiveFilter}
+          className="w-full"
+        >
+          <TabsList className="grid w-full grid-cols-5">
+            {projectTabs.map((tab) => (
+              <TabsTrigger 
+                key={tab.value} 
+                value={tab.value}
+                className="flex items-center justify-center py-2 text-xs"
+              >
+                {tab.icon}
+                <span>{tab.label}</span>
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
+      </div>
+      
+      <div className="rounded-md border">
+        <Table>
         <TableHeader>
           <TableRow>
             <TableHead>Project</TableHead>
@@ -152,8 +195,8 @@ export function ProjectList({ organizationId, isSuperAdmin = false }: ProjectLis
           </TableRow>
         </TableHeader>
         <TableBody>
-          {Array.isArray(projects) && projects.length > 0 ? (
-            projects.map((project) => (
+          {Array.isArray(filteredProjects) && filteredProjects.length > 0 ? (
+            filteredProjects.map((project) => (
             <TableRow key={project.id}>
               <TableCell className="font-medium">
                 <div className="flex flex-col">
@@ -220,7 +263,8 @@ export function ProjectList({ organizationId, isSuperAdmin = false }: ProjectLis
             </TableRow>
           )}
         </TableBody>
-      </Table>
+        </Table>
+      </div>
     </div>
   );
 }

@@ -45,7 +45,7 @@ export default function OrganizationProjectsPage() {
             Manage projects for {currentOrganization.name}
           </p>
         </div>
-        <NewProjectDialog onProjectCreated={handleProjectCreated} />
+        <NewProjectDialog onProjectCreated={handleProjectCreated} organizationId={''} />
       </div>
 
       <Card>
@@ -81,7 +81,7 @@ export default function OrganizationProjectsPage() {
         </CardHeader>
         <CardContent className="p-0">
           <Tabs defaultValue="all" onValueChange={setActiveTab} className="w-full">
-            <div className="border-b px-6">
+            {/* <div className="border-b px-6">
               <TabsList className="w-full justify-start rounded-none bg-transparent p-0">
                 <TabsTrigger 
                   value="all" 
@@ -108,7 +108,7 @@ export default function OrganizationProjectsPage() {
                   On Hold
                 </TabsTrigger>
               </TabsList>
-            </div>
+            </div> */}
             
             <div className="p-6">
               <TabsContent value="all" className="m-0">

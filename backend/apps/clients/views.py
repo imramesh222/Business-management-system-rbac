@@ -126,15 +126,81 @@ class ClientViewSet(viewsets.ModelViewSet):
         """
         user = self.request.user
         queryset = super().get_queryset()
+    
+        # Get organization_id from query params or user's organization
+        organization_id = self.request.query_params.get('organization_id')
+    
+        # If organization_id is provided in query params, filter by it
+        if organization_id:
+            print(f"[DEBUG] Filtering clients by organization_id: {organization_id}")
+            return queryset.filter(organization_id=organization_id)
+    
+        # If user is staff or superuser, return all clients
+        if user.is_staff or user.is_superuser:
+            print("[DEBUG] User is staff/superuser, returning all clients")
+            return queryset
+    
+        # Try to get organization from user's profile
+        organization = None
+        if hasattr(user, 'admin') and hasattr(user.admin, 'organization'):
+            organization = user.admin.organization
+        elif hasattr(user, 'salesperson') and hasattr(user.salesperson, 'organization'):
+            organization = user.salesperson.organization
+        elif hasattr(user, 'organization_memberships') and user.organization_memberships.exists():
+            # Handle case where user has organization memberships
+            membership = user.organization_memberships.first()
+            organization = membership.organization if hasattr(membership, 'organization') else None
+    
+        if organization:
+            print(f"[DEBUG] Filtering clients for organization: {organization.id}")
+            return queryset.filter(organization=organization)
+    
+        # If we get here, return an empty queryset
+        print("[DEBUG] No organization found for user, returning empty queryset")
+        return Client.objects.none()
+        """
+        Filter clients based on user's role and organization.
+        """
+        user = self.request.user
+        queryset = super().get_queryset()
+        
+        print(f"[DEBUG] Getting queryset for user: {user.id} - {user.email}")
+        print(f"[DEBUG] User type: {type(user)}")
+        print(f"[DEBUG] User attributes: {dir(user)}")
+        print(f"[DEBUG] Has admin: {hasattr(user, 'admin')}")
+        print(f"[DEBUG] Has salesperson: {hasattr(user, 'salesperson')}")
+        print(f"[DEBUG] User groups: {user.groups.all() if hasattr(user, 'groups') else 'No groups'}")
+        
+        # Get organization from user's profile or request
+        organization_id = self.request.query_params.get('organization_id') or \
+                        getattr(user, 'organization_id', None)
+        
+        if organization_id:
+            print(f"[DEBUG] Using organization_id from request/user: {organization_id}")
+            return queryset.filter(organization_id=organization_id)
         
         # If user is admin, return all clients in their organization
         if hasattr(user, 'admin'):
-            return queryset.filter(organization=user.admin.organization)
+            org = user.admin.organization
+            print(f"[DEBUG] User is admin, organization: {org.id if org else 'None'}")
+            return queryset.filter(organization=org)
+        
         # If user is salesperson, return their clients
-        elif hasattr(user, 'salesperson'):
-            return queryset.filter(
-                Q(organization=user.salesperson.organization) &
+        if hasattr(user, 'salesperson'):
+            org = user.salesperson.organization
+            print(f"[DEBUG] User is salesperson, organization: {org.id if org else 'None'}")
+            result = queryset.filter(
+                Q(organization=org) &
                 (Q(salesperson=user) | Q(salesperson__isnull=True))
             )
-        # Default to empty queryset if no permissions
+            print(f"[DEBUG] Found {result.count()} clients for salesperson")
+            return result
+        
+        # If user is staff or superuser, return all clients
+        if user.is_staff or user.is_superuser:
+            print("[DEBUG] User is staff or superuser, returning all clients")
+            return queryset
+        
+        # Log if user has no role
+        print("[DEBUG] User has no recognized role")
         return Client.objects.none()

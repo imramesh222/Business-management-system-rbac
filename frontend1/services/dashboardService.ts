@@ -28,6 +28,12 @@ export interface ActivityItem {
 }
 
 export interface ProjectItem {
+  due_date: string;
+  description: string;
+  completed_tasks: number;
+  total_tasks: number;
+  created_at: string;
+  updated_at: string;
   id: string;
   name: string;
   status: 'planning' | 'in_progress' | 'on_hold' | 'completed' | 'cancelled';
@@ -53,129 +59,145 @@ export interface DashboardData {
   recent_activities: ActivityItem[];
   active_projects: ProjectItem[];
   organization_info?: OrganizationInfo;
-  // Add these to handle different API response formats
   organization?: OrganizationInfo;
   org?: OrganizationInfo;
 }
 
 /**
- * Fetches dashboard data for the organization
- * @param isSuperAdmin Whether the current user is a superadmin
+ * Process project data to ensure all required fields have values
  */
+const processProjects = (projects: any[]): ProjectItem[] => {
+  if (!Array.isArray(projects)) return [];
+
+  console.log('Raw projects data from API:', projects); // Add this line
+
+  return projects.map(project => {
+    const projectId = project.id || '';
+    const defaultName = project.title || // Try title field
+      project.project_name || // Try project_name field
+      (projectId ? `Project ${projectId.substring(0, 8)}` : 'New Project');
+
+
+    return {
+      id: projectId,
+      name: project.name || defaultName,
+      description: project.description || 'No description available',
+      status: project.status || 'in_progress',
+      progress: project.progress || 0,
+      members_count: project.members_count || project.member_count || 0,
+      deadline: project.deadline || project.due_date || new Date().toISOString(),
+      start_date: project.start_date || new Date().toISOString(),
+      status_color: project.status_color ||
+        (project.status === 'completed' ? '#10b981' :
+          project.status === 'in_progress' ? '#3b82f6' :
+            project.status === 'on_hold' ? '#f59e0b' :
+              project.status === 'cancelled' ? '#ef4444' : '#9ca3af'),
+      completed_tasks: project.completed_tasks || 0,
+      total_tasks: project.total_tasks || 0,
+      due_date: project.due_date || project.deadline || new Date().toISOString(),
+      created_at: project.created_at || new Date().toISOString(),
+      updated_at: project.updated_at || new Date().toISOString()
+    };
+  });
+};
+
 export const fetchDashboardData = async (isSuperAdmin: boolean = false, organizationId?: string): Promise<DashboardData> => {
   try {
-    // Use the appropriate endpoint based on user role
-    const endpoint = isSuperAdmin 
-      ? '/dashboard/metrics/'  // Superadmin dashboard
-      : '/dashboard/admin/overview/';  // Organization admin dashboard
-    
+    const endpoint = isSuperAdmin
+      ? '/dashboard/metrics/'
+      : '/dashboard/admin/overview/';
+
     console.log('Fetching dashboard data from:', endpoint);
-    
-    // Define the response type for the member count endpoint
+
     interface MemberCountResponse {
       organization_id: string;
       organization_name: string;
       member_count: number;
     }
-    
-    // Log the API URL for debugging
-    console.log('API Base URL:', process.env.NEXT_PUBLIC_API_URL);
-    
-    // Log the member count endpoint for debugging
-    const memberCountEndpoint = `org/organizations/${organizationId}/member-count/`;
-    console.log('Member count endpoint:', memberCountEndpoint);
 
-    // Get auth token for the request
     const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : undefined;
-    
-    // Fetch dashboard data and member count in parallel
+
     const [dashboardResponse, memberCountResponse] = await Promise.all([
       apiGet<DashboardData>(endpoint, { token: token || undefined }),
-      // Only fetch member count if we have an organization ID and token
       organizationId && token ? apiGet<MemberCountResponse>(
         `org/organizations/${organizationId}/member-count/`,
         { token }
-      ).then(response => {
-        console.log('Member count response:', response);
-        return response;
-      }).catch((error) => {
-        console.error('Error fetching member count:', error);
-        return { member_count: 0 } as MemberCountResponse;
-      }) : Promise.resolve({ member_count: 0 } as MemberCountResponse)
+      ).catch(() => ({ member_count: 0 } as MemberCountResponse))
+        : Promise.resolve({ member_count: 0 } as MemberCountResponse)
     ]);
-    
-    console.log('Dashboard API response:', dashboardResponse);
-    
-    // Merge member count into metrics if available
-    if (memberCountResponse?.member_count !== undefined) {
-      console.log('Merging member count into metrics:', memberCountResponse.member_count);
-      dashboardResponse.metrics = dashboardResponse.metrics || {};
-      dashboardResponse.metrics.total_members = memberCountResponse.member_count;
-      dashboardResponse.metrics.active_members = memberCountResponse.member_count; // Update active members as well if needed
-      console.log('Updated metrics:', dashboardResponse.metrics);
-    } else {
-      console.log('No member count received from API, using default values');
-    }
-    
-    // Check if organization info is in the response
-    const orgInfo = dashboardResponse.organization_info || dashboardResponse.organization || dashboardResponse.org;
-    
-    // Transform the response to match our interface if needed
-    const data: DashboardData = {
-      metrics: {
-        total_members: dashboardResponse?.metrics?.total_members ?? 0,
-        active_members: dashboardResponse?.metrics?.active_members ?? 0,
-        monthly_revenue: dashboardResponse?.metrics?.monthly_revenue ?? 0,
-        tasks_completed: dashboardResponse?.metrics?.tasks_completed ?? 0,
-        team_performance: dashboardResponse?.metrics?.team_performance ?? 0,
-        active_projects: dashboardResponse?.metrics?.active_projects ?? 0,
-        member_growth: dashboardResponse?.metrics?.member_growth ?? 0,
-        revenue_change: dashboardResponse?.metrics?.revenue_change ?? 0,
-        task_completion_rate: dashboardResponse?.metrics?.task_completion_rate ?? 0
-      },
-      recent_activities: ((dashboardResponse as any).recent_activities || []).map((activity: any) => ({
-        id: activity.id,
-        title: activity.title,
-        description: activity.description,
-        timestamp: activity.timestamp,
-        type: (activity.type as 'info' | 'success' | 'warning' | 'error') || 'info',
-        ...(activity.user && {
-          user: {
-            id: activity.user.id,
-            name: activity.user.name,
-            ...(activity.user.avatar && { avatar: activity.user.avatar })
-          }
-        })
-      })),
-      ...(orgInfo && { organization_info: orgInfo }),
-      active_projects: ((dashboardResponse as any).active_projects || []).map((project: any) => ({
-        id: project.id,
-        name: project.name,
-        status: (project.status as 'planning' | 'in_progress' | 'on_hold' | 'completed' | 'cancelled') || 'planning',
-        progress: project.progress || 0,
-        members_count: project.members_count || 0,
-        deadline: project.deadline,
-        start_date: project.start_date,
-        status_color: project.status_color || 'bg-gray-100 text-gray-800'
-      })),
-      // Include organization_info if available in response
-      ...(orgInfo && {
-        organization_info: {
-          id: orgInfo.id,
-          name: orgInfo.name,
-          admin: {
-            name: orgInfo.admin?.name || '',
-            username: orgInfo.admin?.username || '',
-            email: orgInfo.admin?.email || ''
+
+    // Handle projects
+    let projects: ProjectItem[] = [];
+    if ((!dashboardResponse.active_projects?.length) && organizationId && token) {
+      try {
+        const endpoints = [
+          `org/projects/?organization_id=${organizationId}`,
+          `projects/?organization=${organizationId}`,
+          `organizations/${organizationId}/projects/`
+        ];
+
+        for (const endpoint of endpoints) {
+          try {
+            const response = await apiGet<any>(endpoint, { token });
+            const result = Array.isArray(response) ? response : (response as any).results || response;
+            if (Array.isArray(result) && result.length > 0) {
+              projects = processProjects(result);
+              if (projects.length > 0) break;
+            }
+          } catch (error) {
+            console.warn(`Failed to fetch projects from ${endpoint}:`, error);
           }
         }
-      })
+      } catch (error) {
+        console.error('Error fetching projects:', error);
+      }
+    }
+
+    // Process organization info
+    const orgInfo = dashboardResponse.organization_info ||
+      dashboardResponse.organization ||
+      dashboardResponse.org;
+
+    // Process metrics
+    const metrics = {
+      total_members: memberCountResponse?.member_count || 0,
+      active_members: memberCountResponse?.member_count || 0,
+      monthly_revenue: dashboardResponse?.metrics?.monthly_revenue || 0,
+      tasks_completed: dashboardResponse?.metrics?.tasks_completed || 0,
+      team_performance: dashboardResponse?.metrics?.team_performance || 0,
+      active_projects: dashboardResponse?.metrics?.active_projects || 0,
+      member_growth: dashboardResponse?.metrics?.member_growth || 0,
+      revenue_change: dashboardResponse?.metrics?.revenue_change || 0,
+      task_completion_rate: dashboardResponse?.metrics?.task_completion_rate || 0
     };
-    
-    return data;
+
+    // Process activities
+    const activities = ((dashboardResponse as any).recent_activities || []).map((activity: any) => ({
+      id: activity.id || Math.random().toString(36).substr(2, 9),
+      title: activity.title || 'Activity',
+      description: activity.description || '',
+      timestamp: activity.timestamp || new Date().toISOString(),
+      type: (['info', 'success', 'warning', 'error'].includes(activity.type)
+        ? activity.type
+        : 'info') as 'info' | 'success' | 'warning' | 'error',
+      ...(activity.user && {
+        user: {
+          id: activity.user.id || '',
+          name: activity.user.name || 'Unknown User',
+          ...(activity.user.avatar && { avatar: activity.user.avatar })
+        }
+      })
+    }));
+
+    return {
+      metrics,
+      recent_activities: activities,
+      active_projects: projects.length ? projects : processProjects(dashboardResponse.active_projects || []),
+      ...(orgInfo && { organization_info: orgInfo })
+    };
+
   } catch (error) {
-    console.error('Error fetching dashboard data:', error);
-    // Return empty data structure in case of error
+    console.error('Error in fetchDashboardData:', error);
     return {
       metrics: {
         total_members: 0,
@@ -194,22 +216,14 @@ export const fetchDashboardData = async (isSuperAdmin: boolean = false, organiza
   }
 };
 
-/**
- * Fetches chart data for the dashboard
- * @param range Time range for the data (e.g., '7d', '30d', '90d')
- */
 export const fetchChartData = async (range: string = '30d') => {
   try {
-    // In a real app, this would be an API call like:
-    // return await apiGet(`/api/dashboard/charts?range=${range}`);
-    
-    // Mock data for charts
     const now = new Date();
-    const days = parseInt(range);
-    const labels = Array.from({ length: days }, (_, i) => 
+    const days = parseInt(range) || 30;
+    const labels = Array.from({ length: days }, (_, i) =>
       format(subDays(now, days - i - 1), 'MMM dd')
     );
-    
+
     return {
       labels,
       datasets: [

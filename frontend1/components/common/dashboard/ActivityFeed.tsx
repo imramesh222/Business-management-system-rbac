@@ -42,7 +42,11 @@ export function ActivityFeed({
   emptyMessage = 'No recent activity',
   maxItems = 5,
 }: ActivityFeedProps) {
-  const displayedActivities = maxItems ? activities.slice(0, maxItems) : activities;
+  // Ensure all activities have a unique ID
+  const displayedActivities = (maxItems ? activities.slice(0, maxItems) : activities).map((activity, index) => ({
+    ...activity,
+    id: activity.id || `activity-${index}-${Date.now()}` // Fallback to a unique ID if not provided
+  }));
 
   return (
     <div className={className}>

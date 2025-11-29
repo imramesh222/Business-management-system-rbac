@@ -8,9 +8,11 @@ from apps.users.serializers import UserSerializer
 from apps.organization.models import OrganizationMember
 
 class ClientSerializer(serializers.ModelSerializer):
+    organization_id = serializers.UUIDField(source='organization.id', read_only=True)
+    
     class Meta:
         model = Client
-        fields = ['id', 'name', 'contact_person', 'salesperson']
+        fields = ['id', 'name', 'contact_person', 'salesperson', 'organization_id']
         read_only_fields = ['id']
         ref_name = 'projects.Client'  # Unique ref_name to avoid conflicts
 
@@ -26,16 +28,37 @@ class ProjectSerializer(serializers.ModelSerializer):
         allow_null=True,
         write_only=True
     )
+    client = serializers.PrimaryKeyRelatedField(
+        queryset=Client.objects.all(),
+        write_only=True
+    )
+    organization = serializers.UUIDField(required=False, write_only=True)
     
     class Meta:
         model = Project
         fields = [
             'id', 'title', 'description', 'status', 'cost', 'discount', 
             'start_date', 'deadline', 'client', 'salesperson', 'project_manager',
-            'project_manager_id', 'verifier', 'is_verified', 'created_at', 'updated_at'
+            'project_manager_id', 'verifier', 'is_verified', 'created_at', 
+            'updated_at', 'organization'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'is_verified']
         depth = 1  # Show nested serialization one level deep
+        
+    def create(self, validated_data):
+        """
+        Create and return a new Project instance, given the validated data.
+        """
+        # Get the client object from validated_data
+        client = validated_data.pop('client')
+        
+        # Create the project with the client
+        project = Project.objects.create(
+            client=client,
+            **validated_data
+        )
+        
+        return project
     
     def validate(self, data):
         """

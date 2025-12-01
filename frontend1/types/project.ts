@@ -1,6 +1,6 @@
 export interface Project {
   id: string;
-  name: string;
+  title: string;
   description: string;
   status: 'planning' | 'in_progress' | 'on_hold' | 'completed' | 'cancelled';
   progress: number;

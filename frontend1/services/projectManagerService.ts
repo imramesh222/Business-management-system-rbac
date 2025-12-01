@@ -12,7 +12,7 @@ const getAuthHeaders = async () => {
 };
 export interface Project {
   id: string;
-  name: string;
+  title: string;
   status: 'planning' | 'in_progress' | 'on_hold' | 'completed' | 'cancelled';
   progress: number;
   due_date: string;
@@ -97,7 +97,7 @@ interface PaginatedResponse<T> {
 }
 
 export const fetchProjects = async (): Promise<Project[]> => {
-  const response = await fetch(getApiUrl('projects/projects/'), {
+  const response = await fetch(getApiUrl('projects/'), {
     headers: await getAuthHeaders()
   });
   

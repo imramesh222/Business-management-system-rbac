@@ -3,14 +3,14 @@
 import { useState, useEffect } from 'react';
 import { apiGet } from '@/services/apiService';
 import { API_URL } from '@/constant';
-import { 
-  Table, 
-  TableBody, 
-  TableCaption, 
-  TableCell, 
-  TableHead, 
-  TableHeader, 
-  TableRow 
+import {
+  Table,
+  TableBody,
+  TableCaption,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow
 } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -65,12 +65,12 @@ export function ProjectList({ organizationId, isSuperAdmin = false }: ProjectLis
       try {
         setLoading(true);
         let url = `${API_URL}/projects/`;
-        
+
         // If organizationId is provided, filter projects by organization
         if (organizationId) {
           url = `${API_URL}/projects/?organization=${organizationId}`;
         }
-        
+
         const response = await apiGet(url);
         // Handle both paginated response and direct array response
         const projectsData = response?.results || (Array.isArray(response) ? response : []);
@@ -106,7 +106,7 @@ export function ProjectList({ organizationId, isSuperAdmin = false }: ProjectLis
     };
 
     const statusInfo = statusMap[status] || { variant: 'outline' as const, label: status };
-    
+
     return (
       <Badge variant={statusInfo.variant}>
         {status === 'in_progress' ? (
@@ -161,15 +161,15 @@ export function ProjectList({ organizationId, isSuperAdmin = false }: ProjectLis
   return (
     <div className="space-y-4">
       <div className="mb-4">
-        <Tabs 
-          value={activeFilter} 
+        <Tabs
+          value={activeFilter}
           onValueChange={setActiveFilter}
           className="w-full"
         >
           <TabsList className="grid w-full grid-cols-5">
             {projectTabs.map((tab) => (
-              <TabsTrigger 
-                key={tab.value} 
+              <TabsTrigger
+                key={tab.value}
                 value={tab.value}
                 className="flex items-center justify-center py-2 text-xs"
               >
@@ -180,89 +180,89 @@ export function ProjectList({ organizationId, isSuperAdmin = false }: ProjectLis
           </TabsList>
         </Tabs>
       </div>
-      
+
       <div className="rounded-md border">
         <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Project</TableHead>
-            <TableHead>Client</TableHead>
-            <TableHead>Status</TableHead>
-            <TableHead>Team</TableHead>
-            <TableHead>Timeline</TableHead>
-            <TableHead>Budget</TableHead>
-            <TableHead>Actions</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {Array.isArray(filteredProjects) && filteredProjects.length > 0 ? (
-            filteredProjects.map((project) => (
-            <TableRow key={project.id}>
-              <TableCell className="font-medium">
-                <div className="flex flex-col">
-                  <span>{project.title}</span>
-                  <span className="text-xs text-muted-foreground">
-                    {project.description.length > 50 
-                      ? `${project.description.substring(0, 50)}...` 
-                      : project.description}
-                  </span>
-                </div>
-              </TableCell>
-              <TableCell>{project.client?.name || 'N/A'}</TableCell>
-              <TableCell>{getStatusBadge(project.status)}</TableCell>
-              <TableCell>
-                <div className="flex items-center">
-                  <Users className="w-4 h-4 mr-1 text-muted-foreground" />
-                  <span>{project.team_members?.length || 0} members</span>
-                </div>
-                {project.project_manager && (
-                  <div className="text-xs text-muted-foreground">
-                    PM: {project.project_manager.user.name}
-                  </div>
-                )}
-              </TableCell>
-              <TableCell>
-                <div className="flex flex-col text-sm">
-                  <div className="flex items-center">
-                    <Calendar className="w-3 h-3 mr-1 text-muted-foreground" />
-                    <span>
-                      {project.start_date 
-                        ? format(new Date(project.start_date), 'MMM d, yyyy') 
-                        : 'Not started'}
-                    </span>
-                  </div>
-                  {project.deadline && (
-                    <div className="text-xs text-muted-foreground">
-                      Due: {format(new Date(project.deadline), 'MMM d, yyyy')}
-                    </div>
-                  )}
-                </div>
-              </TableCell>
-              <TableCell>
-                <div className="flex items-center">
-                  <DollarSign className="w-3 h-3 mr-1 text-muted-foreground" />
-                  <span>${project.cost.toLocaleString()}</span>
-                  {project.discount > 0 && (
-                    <span className="ml-1 text-xs text-green-500">
-                      (${project.discount.toLocaleString()} off)
-                    </span>
-                  )}
-                </div>
-              </TableCell>
-              <TableCell>
-                <Button variant="ghost" size="sm">
-                  View
-                </Button>
-              </TableCell>
-            </TableRow>
-          ))) : (
+          <TableHeader>
             <TableRow>
-              <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
-                {loading ? 'Loading projects...' : 'No projects found'}
-              </TableCell>
+              <TableHead>Project</TableHead>
+              <TableHead>Client</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead>Team</TableHead>
+              <TableHead>Timeline</TableHead>
+              <TableHead>Budget</TableHead>
+              <TableHead>Actions</TableHead>
             </TableRow>
-          )}
-        </TableBody>
+          </TableHeader>
+          <TableBody>
+            {Array.isArray(filteredProjects) && filteredProjects.length > 0 ? (
+              filteredProjects.map((project) => (
+                <TableRow key={project.id}>
+                  <TableCell className="font-medium">
+                    <div className="flex flex-col">
+                      <span>{project.title}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {project.description.length > 50
+                          ? `${project.description.substring(0, 50)}...`
+                          : project.description}
+                      </span>
+                    </div>
+                  </TableCell>
+                  <TableCell>{project.client?.name || 'N/A'}</TableCell>
+                  <TableCell>{getStatusBadge(project.status)}</TableCell>
+                  <TableCell>
+                    <div className="flex items-center">
+                      <Users className="w-4 h-4 mr-1 text-muted-foreground" />
+                      <span>{project.team_members?.length || 0} members</span>
+                    </div>
+                    {project.project_manager?.user?.name && (
+                      <div className="text-xs text-muted-foreground">
+                        PM: {project.project_manager.user.name}
+                      </div>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex flex-col text-sm">
+                      <div className="flex items-center">
+                        <Calendar className="w-3 h-3 mr-1 text-muted-foreground" />
+                        <span>
+                          {project.start_date
+                            ? format(new Date(project.start_date), 'MMM d, yyyy')
+                            : 'Not started'}
+                        </span>
+                      </div>
+                      {project.deadline && (
+                        <div className="text-xs text-muted-foreground">
+                          Due: {format(new Date(project.deadline), 'MMM d, yyyy')}
+                        </div>
+                      )}
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex items-center">
+                      <DollarSign className="w-3 h-3 mr-1 text-muted-foreground" />
+                      <span>${project.cost.toLocaleString()}</span>
+                      {project.discount > 0 && (
+                        <span className="ml-1 text-xs text-green-500">
+                          (${project.discount.toLocaleString()} off)
+                        </span>
+                      )}
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <Button variant="ghost" size="sm">
+                      View
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))) : (
+              <TableRow>
+                <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                  {loading ? 'Loading projects...' : 'No projects found'}
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
         </Table>
       </div>
     </div>

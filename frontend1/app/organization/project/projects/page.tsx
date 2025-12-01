@@ -16,7 +16,7 @@ import { useParams } from 'next/navigation';
 
 interface Project {
   id: string;
-  name: string;
+  title: string;
   status: 'planning' | 'in_progress' | 'on_hold' | 'completed' | 'cancelled';
   progress: number;
   due_date: string;
@@ -53,10 +53,16 @@ export default function ProjectsPage() {
     loadProjects();
   }, []);
 
-  const filteredProjects = projects.filter(project =>
-    project.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    project.status.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredProjects = projects.filter(project => {
+    // Use 'title' to match the backend model
+    const projectTitle = project.title || '';
+    const projectStatus = project.status || '';
+
+    return (
+      projectTitle.toString().toLowerCase().includes(searchQuery.toLowerCase()) ||
+      projectStatus.toString().toLowerCase().includes(searchQuery.toLowerCase())
+    );
+  });
 
   const getStatusBadge = (status: string) => {
     const statusMap: Record<string, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' }> = {
@@ -106,7 +112,7 @@ export default function ProjectsPage() {
           <h1 className="text-2xl font-bold">Projects</h1>
           <p className="text-sm text-gray-500">Manage and track your projects</p>
         </div>
-        <NewProjectDialog 
+        <NewProjectDialog
           organizationId={organizationId}
           isSuperAdmin={user?.role === 'superadmin'}
           isOrgAdmin={user?.organization_role === 'admin'}
@@ -115,7 +121,7 @@ export default function ProjectsPage() {
             // Refresh projects list when a new project is created
             console.log('New project created, refresh projects list');
             // Add project refresh logic here if needed
-          }} 
+          }}
         />
       </div>
 
@@ -147,7 +153,7 @@ export default function ProjectsPage() {
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                   <div className="space-y-2">
                     <div className="flex items-center gap-3">
-                      <h3 className="font-semibold">{project.name}</h3>
+                      <h3 className="font-semibold">{project.title}</h3>
                       {getStatusBadge(project.status)}
                     </div>
                     <div className="space-y-2">
@@ -160,15 +166,15 @@ export default function ProjectsPage() {
                   </div>
                   <div className="flex items-center gap-2">
                     <div className="flex -space-x-2">
-                      {project.team_members.slice(0, 3).map((member) => (
+                      {(project.team_members || []).slice(0, 3).map((member) => (
                         <Avatar key={member.id} className="h-8 w-8 border-2 border-white">
                           <AvatarImage src={member.avatar || ''} alt={member.name} />
-                          <AvatarFallback>{member.name.charAt(0)}</AvatarFallback>
+                          <AvatarFallback>{member.name?.charAt(0) || 'U'}</AvatarFallback>
                         </Avatar>
                       ))}
-                      {project.team_members.length > 3 && (
+                      {(project.team_members?.length || 0) > 3 && (
                         <div className="h-8 w-8 rounded-full bg-gray-100 border-2 border-white flex items-center justify-center text-xs font-medium">
-                          +{project.team_members.length - 3}
+                          +{(project.team_members?.length || 0) - 3}
                         </div>
                       )}
                     </div>

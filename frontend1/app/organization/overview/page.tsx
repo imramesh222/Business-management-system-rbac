@@ -24,7 +24,7 @@ interface Member {
 
 interface Project {
   id: string;
-  name: string;
+  title: string;
   status: string;
   description?: string;
 }
@@ -101,7 +101,7 @@ export default function OverviewPage() {
             <div className="space-y-4">
               {data._raw.projects.map((project) => (
                 <div key={project.id} className="border rounded-lg p-3">
-                  <div className="font-medium">{project.name}</div>
+                  <div className="font-medium">{project.title}</div>
                   <div className="text-sm text-muted-foreground">
                     Status: {project.status.split('_').map(word => 
                       word.charAt(0).toUpperCase() + word.slice(1)

@@ -423,7 +423,7 @@ export interface ExtendedOrganizationDashboardData {
 
 interface Project {
   id: string;
-  name: string;
+  title: string;
   description: string;
   status: string;
   progress: number;

@@ -5,6 +5,7 @@ from .models import Project
 from .serializers import ProjectSerializer
 from rest_framework.permissions import IsAuthenticated
 from rest_framework_simplejwt.authentication import JWTAuthentication
+from apps.clients.models import Client
 
 
 # Import organization models
@@ -18,9 +19,46 @@ class ProjectViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
 
     def create(self, request, *args, **kwargs):
-        serializer = self.get_serializer(data=request.data)
+        """
+        Create a new project.
+        """
+        # Make a mutable copy of the request data
+        data = request.data.copy()
+        
+        # If project_manager is in the data, ensure it's a valid project manager
+        project_manager_id = data.get('project_manager')
+        if project_manager_id:
+            try:
+                project_manager = OrganizationMember.objects.get(
+                    id=project_manager_id,
+                    role=OrganizationRoleChoices.PROJECT_MANAGER
+                )
+                # Ensure the project manager is from the same organization as the client
+                client_id = data.get('client')
+                if client_id:
+                    client = Client.objects.get(id=client_id)
+                    if project_manager.organization_id != client.organization_id:
+                        return Response(
+                            {"project_manager": "Project manager must belong to the same organization as the client"},
+                            status=status.HTTP_400_BAD_REQUEST
+                        )
+                # Set the project manager in the data
+                data['project_manager_id'] = project_manager.id
+            except OrganizationMember.DoesNotExist:
+                return Response(
+                    {"project_manager": "Invalid project manager ID or not a project manager"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        
+        # Now validate and save with the updated data
+        serializer = self.get_serializer(data=data)
         serializer.is_valid(raise_exception=True)
-        self.perform_create(serializer)
+        project = serializer.save()
+        
+        # Log the project creation
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"Created project {project.id} with project manager {project_manager_id}")
         headers = self.get_success_headers(serializer.data)
         return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
     
@@ -37,7 +75,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         """
-        Filter projects based on user's role and organization.
+        Filter projects based on user's role, organization, and project manager assignment.
         """
         user = self.request.user
         queryset = super().get_queryset()
@@ -57,6 +95,20 @@ class ProjectViewSet(viewsets.ModelViewSet):
                 except (ValueError, AttributeError):
                     return queryset.none()
             return queryset
+        
+        # Check if the user is a project manager
+        try:
+            # Get the organization member record for this user
+            org_member = OrganizationMember.objects.filter(user=user).first()
+            
+            # If user is a project manager, return their projects
+            if org_member and org_member.role == OrganizationRoleChoices.PROJECT_MANAGER:
+                return queryset.filter(project_manager=org_member)
+                
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Error checking project manager status for user {user.id}", exc_info=True)
             
         # For regular users, first try to get organization from user.organization_id
         if hasattr(user, 'organization_id') and user.organization_id:
@@ -77,15 +129,6 @@ class ProjectViewSet(viewsets.ModelViewSet):
         # If no organization is found, return empty queryset
         return queryset.none()
     
-    def create(self, request, *args, **kwargs):
-        """
-        Create a new project.
-        """
-        serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        self.perform_create(serializer)
-        headers = self.get_success_headers(serializer.data)
-        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
     
     def perform_create(self, serializer):
         """

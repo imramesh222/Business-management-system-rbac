@@ -5,7 +5,7 @@ from apps.support.models import SupportTicket
 from apps.clients.models import Client
 from apps.payments.models import Payment
 from apps.users.serializers import UserSerializer
-from apps.organization.models import OrganizationMember
+from apps.organization.models import OrganizationMember, OrganizationRoleChoices
 
 class ClientSerializer(serializers.ModelSerializer):
     organization_id = serializers.UUIDField(source='organization.id', read_only=True)
@@ -22,12 +22,13 @@ class ProjectSerializer(serializers.ModelSerializer):
     Handles project manager assignment and validation.
     """
     project_manager_id = serializers.PrimaryKeyRelatedField(
-        queryset=OrganizationMember.objects.all(),
+        queryset=OrganizationMember.objects.filter(role=OrganizationRoleChoices.PROJECT_MANAGER),
         source='project_manager',
         required=False,
         allow_null=True,
         write_only=True
     )
+    project_manager = serializers.SerializerMethodField(read_only=True)
     client = serializers.PrimaryKeyRelatedField(
         queryset=Client.objects.all(),
         write_only=True
@@ -37,13 +38,21 @@ class ProjectSerializer(serializers.ModelSerializer):
     class Meta:
         model = Project
         fields = [
-            'id', 'title', 'description', 'status', 'cost', 'discount', 
+            'id', 'title', 'description', 'status', 'cost', 'discount',
             'start_date', 'deadline', 'client', 'salesperson', 'project_manager',
             'project_manager_id', 'verifier', 'is_verified', 'created_at', 
-            'updated_at', 'organization'
+            'updated_at', 'completed_at', 'organization'  # Added 'organization' here
         ]
-        read_only_fields = ['id', 'created_at', 'updated_at', 'is_verified']
-        depth = 1  # Show nested serialization one level deep
+        read_only_fields = ['id', 'created_at', 'updated_at', 'completed_at', 'is_verified']
+        depth = 1
+    def get_project_manager(self, obj):
+        if obj.project_manager:
+            return {
+                'id': obj.project_manager.id,
+                'name': str(obj.project_manager.user.get_full_name() or obj.project_manager.user.username),
+                'email': obj.project_manager.user.email
+            }
+        return None
         
     def create(self, validated_data):
         """

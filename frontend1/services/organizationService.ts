@@ -12,6 +12,72 @@ import {
   BillingPlan
 } from '@/types/organization';
 
+// Update in organizationService.ts
+export const getOrganizationOverview = async (organizationId: string, userId?: string) => {
+  try {
+    // Initialize empty arrays for all data
+    let members: any[] = [];
+    let projects: Project[] = [];
+    let tasks: any[] = [];
+    
+    // Try to fetch members
+    try {
+      const membersResponse = await apiGet(`/org/organizations/${organizationId}/members/`);
+      members = Array.isArray(membersResponse) ? membersResponse : membersResponse?.results || [];
+    } catch (error) {
+      console.warn('Could not fetch members:', error);
+    }
+    
+    // Try to fetch projects if needed
+    try {
+      const projectsResponse = await apiGet(`/org/organizations/${organizationId}/projects/`);
+      projects = Array.isArray(projectsResponse) ? projectsResponse : projectsResponse?.results || [];
+    } catch (error) {
+      console.warn('Could not fetch projects:', error);
+    }
+    
+    // Try to fetch tasks if needed
+    try {
+      const tasksResponse = await apiGet(`/tasks/?organization=${organizationId}`);
+      tasks = Array.isArray(tasksResponse) ? tasksResponse : tasksResponse?.results || [];
+    } catch (error) {
+      console.warn('Could not fetch tasks:', error);
+    }
+
+    // Calculate metrics
+    const pendingTasks = tasks.filter((task: any) => task.status === 'pending');
+    const completedTasks = tasks.filter((task: any) => task.status === 'completed');
+    const completionRate = tasks.length > 0 
+      ? Math.round((completedTasks.length / tasks.length) * 100) 
+      : 0;
+
+    return {
+      active_projects: projects.length,
+      team_members: members.length,
+      tasks_due: pendingTasks.length,
+      completion_rate: completionRate,
+      _raw: { 
+        projects: projects, 
+        members: members, 
+        tasks: tasks 
+      }
+    };
+  } catch (error) {
+    console.error('Error in getOrganizationOverview:', error);
+    // Return empty data in case of error
+    return {
+      active_projects: 0,
+      team_members: 0,
+      tasks_due: 0,
+      completion_rate: 0,
+      _raw: {
+        projects: [],
+        members: [],
+        tasks: []
+      }
+    };
+  }
+};
 // Re-export the type with a consistent name
 export type OrganizationListItem = OrgListItem;
 

@@ -1,6 +1,7 @@
 import uuid
 from django.db import models
 from django.utils import timezone
+from model_utils import FieldTracker
 from apps.organization.models import OrganizationMember, OrganizationRoleChoices
 from apps.clients.models import Client
 
@@ -50,13 +51,11 @@ class Project(models.Model):
         help_text="Client who owns this project"
     )
     salesperson = models.ForeignKey(
-        OrganizationMember,
+        'organization.OrganizationMember',
         on_delete=models.SET_NULL,
-        related_name='projects',
         null=True,
         blank=True,
-        limit_choices_to={'role': OrganizationRoleChoices.SALESPERSON},
-        help_text="Salesperson responsible for this project"
+        related_name='sales_projects'  # Changed from default
     )
     project_manager = models.ForeignKey(
         OrganizationMember,
@@ -80,6 +79,12 @@ class Project(models.Model):
         default=False,
         help_text="Whether the project has been verified"
     )
+    team_members = models.ManyToManyField(
+        'organization.OrganizationMember',
+        related_name='team_projects',  # Changed from default
+        blank=True
+    )
+    tracker = FieldTracker(fields=['status'])
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
     completed_at = models.DateTimeField(null=True, blank=True)

@@ -34,6 +34,7 @@ class ProjectSerializer(serializers.ModelSerializer):
         write_only=True
     )
     organization = serializers.UUIDField(required=False, write_only=True)
+    team_members = serializers.SerializerMethodField(read_only=True)
     
     class Meta:
         model = Project
@@ -41,16 +42,26 @@ class ProjectSerializer(serializers.ModelSerializer):
             'id', 'title', 'description', 'status', 'cost', 'discount',
             'start_date', 'deadline', 'client', 'salesperson', 'project_manager',
             'project_manager_id', 'verifier', 'is_verified', 'created_at', 
-            'updated_at', 'completed_at', 'organization'  # Added 'organization' here
+            'updated_at', 'completed_at', 'organization', 'team_members'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'completed_at', 'is_verified']
         depth = 1
+
+    def get_team_members(self, obj):
+        return [{
+            'id': member.id,
+            'name': str(member.user.get_full_name() or member.user.username),
+            'email': member.user.email,
+            'role': member.get_role_display()
+        } for member in obj.team_members.all()]
+
     def get_project_manager(self, obj):
         if obj.project_manager:
             return {
                 'id': obj.project_manager.id,
                 'name': str(obj.project_manager.user.get_full_name() or obj.project_manager.user.username),
-                'email': obj.project_manager.user.email
+                'email': obj.project_manager.user.email,
+                'role': obj.project_manager.get_role_display()
             }
         return None
         
@@ -85,7 +96,7 @@ class ProjectSerializer(serializers.ModelSerializer):
     
     def to_representation(self, instance):
         """
-        Custom representation to include project manager details.
+        Custom representation to include project manager and team members details.
         """
         representation = super().to_representation(instance)
         
@@ -99,7 +110,6 @@ class ProjectSerializer(serializers.ModelSerializer):
             }
             
         return representation
-
 class TaskSerializer(serializers.ModelSerializer):
     """
     Serializer for Task model with primary key relationships.

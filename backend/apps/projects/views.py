@@ -1,22 +1,22 @@
 from rest_framework import viewsets, status
 from rest_framework.response import Response
 from rest_framework.decorators import action
-from .models import Project
-from .serializers import ProjectSerializer
 from rest_framework.permissions import IsAuthenticated
 from rest_framework_simplejwt.authentication import JWTAuthentication
+from django.shortcuts import get_object_or_404
+
+from .models import Project
+from .serializers import ProjectSerializer
 from apps.clients.models import Client
-
-
-# Import organization models
 from apps.organization.models import OrganizationMember, OrganizationRoleChoices
 from apps.users.permissions import IsAdmin, IsOrganizationMember
+
 
 class ProjectViewSet(viewsets.ModelViewSet):
     queryset = Project.objects.all()
     serializer_class = ProjectSerializer
     authentication_classes = [JWTAuthentication]
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsOrganizationMember]
 
     def create(self, request, *args, **kwargs):
         """
@@ -68,8 +68,9 @@ class ProjectViewSet(viewsets.ModelViewSet):
         """
         if self.action in ['list', 'retrieve']:
             return [IsAuthenticated()]
-        elif self.action == 'create':
-            return [IsAuthenticated(), IsOrganizationMember()]
+        elif self.action in ['create', 'add_team_member']:
+            # For these actions, we'll do custom permission checking inside the method
+            return [IsAuthenticated()]
         return [IsAuthenticated(), IsAdmin()]
         
     
@@ -185,3 +186,114 @@ class ProjectViewSet(viewsets.ModelViewSet):
         
         serializer = self.get_serializer(project)
         return Response(serializer.data)
+
+    @action(detail=True, methods=['post'], url_path='team-members')
+    def add_team_member(self, request, pk=None):
+        """
+        Add a team member to the project.
+        """
+        project = self.get_object()
+        
+        # Debug logging
+        print(f"\n=== DEBUG: Adding team member ===")
+        print(f"User: {request.user} (ID: {request.user.id})")
+        print(f"User is_staff: {request.user.is_staff}, is_superuser: {request.user.is_superuser}")
+        print(f"Project ID: {project.id}")
+        print(f"Project organization ID: {project.client.organization.id}")
+        
+        # Get the organization member for the current user
+        try:
+            # Get all memberships for the current user
+            user_memberships = request.user.organization_memberships.all()
+            print(f"User memberships count: {user_memberships.count()}")
+            print(f"User memberships: {[f'{m.role} in org {m.organization.id}' for m in user_memberships]}")
+            
+            # Get the specific membership for this organization
+            user_membership = request.user.organization_memberships.get(
+                organization=project.client.organization
+            )
+            print(f"User role in project's org: {user_membership.role}")
+            
+        except OrganizationMember.DoesNotExist:
+            print("User is not a member of the project's organization")
+            return Response(
+                {"error": "You are not a member of this organization"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        except Exception as e:
+            print(f"Error getting user membership: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return Response(
+                {"error": f"Error checking organization membership: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+        
+        # Check if user is admin or project manager
+        if user_membership.role not in [
+            OrganizationRoleChoices.ADMIN,
+            OrganizationRoleChoices.PROJECT_MANAGER
+        ]:
+            print(f"Access denied: User role {user_membership.role} is not authorized")
+            return Response(
+                {"error": "You need to be an admin or project manager to add team members"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        user_id = request.data.get('user_id')
+        print(f"Attempting to add user_id: {user_id}")
+        
+        if not user_id:
+            return Response(
+                {"error": "User ID is required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            # Check if user is already a team member
+            if project.team_members.filter(id=user_id).exists():
+                return Response(
+                    {"error": "This user is already a team member"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            # Get the organization member
+            org_member = OrganizationMember.objects.get(
+                id=user_id,
+                organization=project.client.organization
+            )
+            print(f"Found org member: {org_member.user.email} (Role: {org_member.role})")
+        
+            # Add member to the project's team_members
+            project.team_members.add(org_member)
+            
+            # Get updated team members for the response
+            team_members_data = [{
+                'id': member.id,
+                'name': member.user.get_full_name() or member.user.email,
+                'email': member.user.email,
+                'role': member.get_role_display()
+            } for member in project.team_members.all()]
+            
+            print("Team member added successfully")
+            return Response({
+                "status": "Team member added successfully",
+                "team_members": team_members_data
+            }, status=status.HTTP_200_OK)
+        
+        except OrganizationMember.DoesNotExist:
+            print(f"Target user {user_id} not found in organization")
+            return Response(
+                {"error": "User not found in organization"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        except Exception as e:
+            print(f"Error adding team member: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return Response(
+                {"error": str(e)},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        finally:
+            print("=== END DEBUG ===\n")

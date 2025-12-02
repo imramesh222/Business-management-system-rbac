@@ -11,12 +11,36 @@ from apps.clients.models import Client
 from apps.organization.models import OrganizationMember, OrganizationRoleChoices
 from apps.users.permissions import IsAdmin, IsOrganizationMember
 
+from rest_framework import permissions
 
+class IsProjectOwnerOrAdmin(permissions.BasePermission):
+    """
+    Custom permission to only allow project owners or admins to edit/delete projects.
+    """
+    def has_object_permission(self, request, view, obj):
+        # Read permissions are allowed to any request,
+        # so we'll always allow GET, HEAD or OPTIONS requests.
+        if request.method in permissions.SAFE_METHODS:
+            return True
+
+        # Check if user is admin
+        if request.user.is_staff or request.user.is_superuser:
+            return True
+
+        # Check if user is the project owner (project manager)
+        if hasattr(obj, 'project_manager') and obj.project_manager and obj.project_manager.user == request.user:
+            return True
+
+        # Check if user is an admin of the project's organization
+        if hasattr(obj, 'client') and hasattr(obj.client, 'organization'):
+            return obj.client.organization.admins.filter(id=request.user.id).exists()
+
+        return False
 class ProjectViewSet(viewsets.ModelViewSet):
     queryset = Project.objects.all()
     serializer_class = ProjectSerializer
     authentication_classes = [JWTAuthentication]
-    permission_classes = [IsAuthenticated, IsOrganizationMember]
+    permission_classes = [IsAuthenticated, IsOrganizationMember, IsProjectOwnerOrAdmin]
 
     def create(self, request, *args, **kwargs):
         """
@@ -66,7 +90,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
         """
         Instantiates and returns the list of permissions that this view requires.
         """
-        if self.action in ['list', 'retrieve']:
+        if self.action in ['list', 'retrieve', 'update', 'partial_update', 'destroy']:
             return [IsAuthenticated()]
         elif self.action in ['create', 'add_team_member']:
             # For these actions, we'll do custom permission checking inside the method

@@ -2,7 +2,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { Plus, Search, Filter, Calendar, Users, DollarSign, Check, X, UserPlus, UserX } from 'lucide-react';
+import { Plus, Search, Filter, Calendar, Users, DollarSign, Check, X, UserPlus, UserX, Edit, Trash2 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -12,6 +12,7 @@ import { Progress } from '@/components/ui/progress';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { Textarea } from '@/components/ui/textarea';
 import { format } from 'date-fns';
 import { fetchProjects } from '@/services/projectManagerService';
 import { useParams, useSearchParams } from 'next/navigation';
@@ -19,32 +20,43 @@ import { useToast } from '@/components/ui/use-toast';
 import { Label } from '@/components/ui/label';
 import { toast } from "@/components/ui/use-toast";
 
+// Update the Project interface to match the one from projectManagerService
 interface Project {
   id: string;
   title: string;
   description?: string;
   status: 'planning' | 'in_progress' | 'on_hold' | 'completed' | 'cancelled';
   progress: number;
-  start_date?: string;
-  due_date: string;
+  start_date?: string | null;  // Allow null
+  deadline: string | null;
   cost?: number;
   discount?: number;
   client?: {
     id: string;
     name: string;
   };
+  project_manager?: {
+    id: string;
+    user: {
+      id: string;
+      name?: string;
+      first_name?: string;
+      last_name?: string;
+    };
+  };
   team_members: Array<{
     id: string;
     name: string;
     avatar: string | null;
-    role?: string; // Add role field
-  }>;
-  project_manager?: {
-    id: string;
-    user: {
+    user?: {
       name: string;
+      first_name?: string;
+      last_name?: string;
     };
-  };
+  }>;
+  created_at?: string;
+  updated_at?: string;
+  is_verified?: boolean;
 }
 
 export default function ProjectsPage() {
@@ -76,6 +88,9 @@ export default function ProjectsPage() {
 
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
+  const [editedProject, setEditedProject] = useState<Partial<Project>>({});
+  const [isEditing, setIsEditing] = useState(false);
+  const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -83,6 +98,112 @@ export default function ProjectsPage() {
   const [availableMembers, setAvailableMembers] = useState<Array<{ id: string, name: string, email: string }>>([]);
   const [selectedMember, setSelectedMember] = useState('');
   const [isLoadingMembers, setIsLoadingMembers] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  // Handle project update
+  const handleUpdateProject = async () => {
+    if (!selectedProject) return;
+
+    try {
+      setIsSaving(true);
+      const token = localStorage.getItem('access_token');
+      if (!token) {
+        toast({
+          title: "Authentication required",
+          description: "Please log in to update projects",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const response = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL}/projects/${selectedProject.id}/`,
+        {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+          body: JSON.stringify(editedProject),
+        }
+      );
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Failed to update project');
+      }
+
+      const updatedProject = await response.json();
+      setProjects(projects.map(p => p.id === updatedProject.id ? updatedProject : p));
+      setSelectedProject(updatedProject);
+      setIsEditing(false);
+      
+      toast({
+        title: "Success",
+        description: "Project updated successfully",
+      });
+    } catch (error) {
+      console.error('Error updating project:', error);
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to update project",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // Handle project deletion
+  const handleDeleteProject = async () => {
+    if (!selectedProject) return;
+
+    try {
+      setIsDeleting(true);
+      const token = localStorage.getItem('access_token');
+      if (!token) {
+        toast({
+          title: "Authentication required",
+          description: "Please log in to delete projects",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const response = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL}/projects/${selectedProject.id}/`,
+        {
+          method: 'DELETE',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+          },
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error('Failed to delete project');
+      }
+
+      setProjects(projects.filter(p => p.id !== selectedProject.id));
+      setSelectedProject(null);
+      setIsDeleteOpen(false);
+      
+      toast({
+        title: "Success",
+        description: "Project deleted successfully",
+      });
+    } catch (error) {
+      console.error('Error deleting project:', error);
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to delete project",
+        variant: "destructive",
+      });
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   const handleRemoveTeamMember = async (memberId: string) => {
     if (!selectedProject) return;
@@ -91,10 +212,20 @@ export default function ProjectsPage() {
 
     try {
       setIsLoadingMembers(true);
+      const token = localStorage.getItem('access_token');
+      if (!token) {
+        toast({
+          title: "Authentication required",
+          description: "Please log in to remove team members",
+          variant: "destructive",
+        });
+        return;
+      }
+
       const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/projects/${selectedProject.id}/team-members/${memberId}`, {
         method: 'DELETE',
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+          'Authorization': `Bearer ${token}`,
         },
       });
 
@@ -289,6 +420,14 @@ export default function ProjectsPage() {
       console.error('Error in fetchAvailableMembers:', error);
     } finally {
       setIsLoadingMembers(false);
+    }
+  }, [selectedProject]);
+
+  // Reset edit mode when project changes
+  useEffect(() => {
+    if (selectedProject) {
+      setEditedProject({ ...selectedProject });
+      setIsEditing(false);
     }
   }, [selectedProject]);
 
@@ -499,47 +638,153 @@ export default function ProjectsPage() {
           {selectedProject && (
             <>
               <DialogHeader>
-                <DialogTitle>{selectedProject.title}</DialogTitle>
-                <DialogDescription className="line-clamp-2">
-                  {selectedProject.description}
-                </DialogDescription>
+                <div className="flex justify-between items-center">
+                  <div>
+                    <DialogTitle>
+                      {isEditing ? 'Edit Project' : selectedProject.title}
+                    </DialogTitle>
+                    {!isEditing && selectedProject.description && (
+                      <DialogDescription className="line-clamp-2">
+                        {selectedProject.description}
+                      </DialogDescription>
+                    )}
+                  </div>
+                  <div className="flex space-x-2">
+                    {!isEditing && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setIsEditing(true)}
+                      >
+                        <Edit className="h-4 w-4 mr-1" />
+                        Edit
+                      </Button>
+                    )}
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      onClick={() => setIsDeleteOpen(true)}
+                      disabled={isDeleting}
+                    >
+                      <Trash2 className="h-4 w-4 mr-1" />
+                      {isDeleting ? 'Deleting...' : 'Delete'}
+                    </Button>
+                  </div>
+                </div>
               </DialogHeader>
               <div className="grid gap-6 py-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <h4 className="text-sm font-medium text-muted-foreground mb-1">Status</h4>
-                    {getStatusBadge(selectedProject.status)}
-                  </div>
-                  <div>
-                    <h4 className="text-sm font-medium text-muted-foreground mb-1">Progress</h4>
-                    <div className="flex items-center gap-2">
-                      <Progress value={selectedProject.progress} className="h-2" />
-                      <span className="text-sm">{selectedProject.progress}%</span>
+                {isEditing ? (
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="title">Title</Label>
+                      <Input
+                        id="title"
+                        value={editedProject.title || ''}
+                        onChange={(e) => setEditedProject({...editedProject, title: e.target.value})}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="description">Description</Label>
+                      <Textarea
+                        id="description"
+                        value={editedProject.description || ''}
+                        onChange={(e) => setEditedProject({...editedProject, description: e.target.value})}
+                        rows={3}
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="status">Status</Label>
+                        <select
+                          id="status"
+                          className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                          value={editedProject.status}
+                          onChange={(e) => setEditedProject({...editedProject, status: e.target.value as any})}
+                        >
+                          {['planning', 'in_progress', 'on_hold', 'completed', 'cancelled'].map((status) => (
+                            <option key={status} value={status}>
+                              {status.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="progress">Progress</Label>
+                        <div className="flex items-center gap-2">
+                          <Input
+                            id="progress"
+                            type="number"
+                            min="0"
+                            max="100"
+                            value={editedProject.progress || 0}
+                            onChange={(e) => setEditedProject({...editedProject, progress: Number(e.target.value)})}
+                            className="w-20"
+                          />
+                          <span>%</span>
+                        </div>
+                      </div>
                     </div>
                   </div>
-                </div>
+                ) : (
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <h4 className="text-sm font-medium text-muted-foreground mb-1">Status</h4>
+                      {getStatusBadge(selectedProject.status)}
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-medium text-muted-foreground mb-1">Progress</h4>
+                      <div className="flex items-center gap-2">
+                        <Progress value={selectedProject.progress} className="h-2" />
+                        <span className="text-sm">{selectedProject.progress}%</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
-                <div>
-                  <h4 className="text-sm font-medium text-muted-foreground mb-2">Timeline</h4>
-                  <div className="grid grid-cols-2 gap-4 text-sm">
-                    <div className="flex items-center gap-2">
-                      <Calendar className="h-4 w-4 text-muted-foreground" />
-                      <span>
-                        {selectedProject.start_date
-                          ? format(new Date(selectedProject.start_date), 'MMM d, yyyy')
-                          : 'Not started'}
-                      </span>
+                {isEditing ? (
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="start_date">Start Date</Label>
+                      <Input
+                        id="start_date"
+                        type="date"
+                        value={editedProject.start_date ? format(new Date(editedProject.start_date), 'yyyy-MM-dd') : ''}
+                        onChange={(e) => setEditedProject({...editedProject, start_date: e.target.value})}
+                      />
                     </div>
-                    <div className="flex items-center gap-2">
-                      <Calendar className="h-4 w-4 text-muted-foreground" />
-                      <span>
-                        {selectedProject.due_date
-                          ? format(new Date(selectedProject.due_date), 'MMM d, yyyy')
-                          : 'No deadline'}
-                      </span>
+                    <div className="space-y-2">
+                      <Label htmlFor="deadline">Deadline</Label>
+                      <Input
+                        id="deadline"
+                        type="date"
+                        value={editedProject.deadline ? format(new Date(editedProject.deadline), 'yyyy-MM-dd') : ''}
+                        onChange={(e) => setEditedProject({...editedProject, deadline: e.target.value})}
+                      />
                     </div>
                   </div>
-                </div>
+                ) : (
+                  <div>
+                    <h4 className="text-sm font-medium text-muted-foreground mb-2">Timeline</h4>
+                    <div className="grid grid-cols-2 gap-4 text-sm">
+                      <div className="flex items-center gap-2">
+                        <Calendar className="h-4 w-4 text-muted-foreground" />
+                        <span>
+                          {selectedProject.start_date
+                            ? format(new Date(selectedProject.start_date), 'MMM d, yyyy')
+                            : 'Not started'}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Calendar className="h-4 w-4 text-muted-foreground" />
+                        <span>
+                          {selectedProject.deadline
+                            ? format(new Date(selectedProject.deadline), 'MMM d, yyyy')
+                            : 'No deadline'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 <div className="space-y-4">
                   <div className="space-y-2">
@@ -568,7 +813,7 @@ export default function ProjectsPage() {
                               </Avatar>
                               <span className="text-sm font-medium">{member.name}</span>
                             </div>
-                            <Button
+                            {/* <Button
                               variant="ghost"
                               size="icon"
                               className="h-7 w-7 text-muted-foreground hover:text-destructive"
@@ -578,7 +823,7 @@ export default function ProjectsPage() {
                               }}
                             >
                               <X className="h-4 w-4" />
-                            </Button>
+                            </Button> */}
                           </div>
                         ))
                       ) : (
@@ -590,27 +835,111 @@ export default function ProjectsPage() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <h4 className="text-sm font-medium text-muted-foreground mb-1">Budget</h4>
-                    <div className="flex items-center gap-1">
-                      <DollarSign className="h-4 w-4 text-muted-foreground" />
-                      <span>${selectedProject.cost?.toLocaleString()}</span>
-                    </div>
-                  </div>
-                  {selectedProject.discount && selectedProject.discount > 0 && (
-                    <div>
-                      <h4 className="text-sm font-medium text-muted-foreground mb-1">Discount</h4>
-                      <div className="text-green-500 flex items-center">
-                        <DollarSign className="h-4 w-4" />
-                        <span>{selectedProject.discount.toLocaleString()}</span>
+                {isEditing ? (
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="cost">Budget ($)</Label>
+                      <div className="relative">
+                        <DollarSign className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                        <Input
+                          id="cost"
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={editedProject.cost || ''}
+                          onChange={(e) => setEditedProject({...editedProject, cost: Number(e.target.value)})}
+                          className="pl-8"
+                        />
                       </div>
                     </div>
-                  )}
-                </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="discount">Discount ($)</Label>
+                      <div className="relative">
+                        <DollarSign className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                        <Input
+                          id="discount"
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={editedProject.discount || ''}
+                          onChange={(e) => setEditedProject({...editedProject, discount: Number(e.target.value)})}
+                          className="pl-8"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <h4 className="text-sm font-medium text-muted-foreground mb-1">Budget</h4>
+                      <div className="flex items-center gap-1">
+                        <DollarSign className="h-4 w-4 text-muted-foreground" />
+                        <span>${selectedProject.cost?.toLocaleString()}</span>
+                      </div>
+                    </div>
+                    {selectedProject.discount && selectedProject.discount > 0 && (
+                      <div>
+                        <h4 className="text-sm font-medium text-muted-foreground mb-1">Discount</h4>
+                        <div className="text-green-500 flex items-center">
+                          <DollarSign className="h-4 w-4" />
+                          <span>{selectedProject.discount.toLocaleString()}</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
+              
+              {isEditing && (
+                <div className="flex justify-end gap-2 pt-4 border-t">
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setEditedProject({ ...selectedProject });
+                      setIsEditing(false);
+                    }}
+                    disabled={isSaving}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    onClick={handleUpdateProject}
+                    disabled={isSaving}
+                  >
+                    {isSaving ? 'Saving...' : 'Save Changes'}
+                  </Button>
+                </div>
+              )}
             </>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={isDeleteOpen} onOpenChange={setIsDeleteOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Project</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete this project? This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end gap-2 pt-4">
+            <Button
+              variant="outline"
+              onClick={() => setIsDeleteOpen(false)}
+              disabled={isDeleting}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDeleteProject}
+              disabled={isDeleting}
+            >
+              {isDeleting ? 'Deleting...' : 'Delete'}
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
 

@@ -13,14 +13,39 @@ const getAuthHeaders = async () => {
 export interface Project {
   id: string;
   title: string;
+  description?: string;
   status: 'planning' | 'in_progress' | 'on_hold' | 'completed' | 'cancelled';
   progress: number;
-  due_date: string;
+  start_date?: string | null;
+  deadline: string | null;
+  cost?: number;
+  discount?: number;
+  client?: {
+    id: string;
+    name: string;
+  };
+  project_manager?: {
+    id: string;
+    user: {
+      id: string;
+      name?: string;
+      first_name?: string;
+      last_name?: string;
+    };
+  };
   team_members: Array<{
     id: string;
     name: string;
     avatar: string | null;
+    user?: {
+      name: string;
+      first_name?: string;
+      last_name?: string;
+    };
   }>;
+  created_at?: string;
+  updated_at?: string;
+  is_verified?: boolean;
 }
 
 export interface Task {

@@ -23,7 +23,8 @@ import {
   List,
   ArrowUpDown,
   ArrowUp,
-  ArrowDown
+  ArrowDown,
+  X
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import {
@@ -60,7 +61,8 @@ interface Project {
   discount: number;
   start_date: string | null;
   end_date: string | null;
-  deadline?: string | null;
+  deadline: string | null;
+  progress?: number;
   budget?: number;
   client: {
     id: string;
@@ -76,6 +78,8 @@ interface Project {
     };
   };
   team_members: Array<{
+    avatar: string;
+    name: string | undefined;
     id: string;
     user: {
       name: string;
@@ -126,7 +130,7 @@ export function ProjectList({
   const [isViewOpen, setIsViewOpen] = useState(false);
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
-  const [editedProject, setEditedProject] = useState<Partial<Project>>({});
+  const [editedProject, setEditedProject] = useState<Partial<Project>>({ progress: 0, });
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<string>('all');
   const [sortField, setSortField] = useState<SortField | null>(null);
@@ -169,7 +173,7 @@ export function ProjectList({
   // Handle sorting
   const handleSort = (field: SortField) => {
     let newOrder: SortOrder = 'asc';
-    
+
     if (sortField === field) {
       if (sortOrder === 'asc') {
         newOrder = 'desc';
@@ -180,7 +184,7 @@ export function ProjectList({
         return;
       }
     }
-    
+
     setSortField(field);
     setSortOrder(newOrder);
   };
@@ -302,19 +306,31 @@ export function ProjectList({
     );
   };
 
+  // Update the handleUpdateProject function
   const handleUpdateProject = async () => {
     if (!selectedProject) return;
 
     try {
       const token = localStorage.getItem('access_token');
-      await axios.patch(
+      if (!token) {
+        toast({
+          title: "Authentication required",
+          description: "Please log in to update projects",
+          variant: "destructive",
+        });
+        router.push('/auth/login');
+        return;
+      }
+
+      const response = await axios.patch(
         `${API_URL}/projects/${selectedProject.id}/`,
         editedProject,
         {
           headers: {
             'Authorization': `Bearer ${token}`,
             'Content-Type': 'application/json',
-          }
+          },
+          withCredentials: true
         }
       );
 
@@ -325,27 +341,59 @@ export function ProjectList({
       setIsEditing(false);
       setIsViewOpen(false);
       await fetchProjects();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error updating project:', error);
+      let errorMessage = "Failed to update project";
+
+      if (error.response) {
+        if (error.response.status === 403) {
+          errorMessage = "You don't have permission to update this project";
+        } else if (error.response.data) {
+          // Handle field-specific errors
+          if (typeof error.response.data === 'object') {
+            errorMessage = Object.entries(error.response.data)
+              .map(([field, errors]) => `${field}: ${Array.isArray(errors) ? errors.join(', ') : errors}`)
+              .join('\n');
+          } else {
+            errorMessage = error.response.data.detail || JSON.stringify(error.response.data);
+          }
+        }
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+
       toast({
         title: "Error",
-        description: "Failed to update project. Please try again.",
+        description: errorMessage,
         variant: "destructive",
       });
     }
   };
 
+  // Update the handleDeleteProject function
   const handleDeleteProject = async () => {
     if (!selectedProject) return;
 
     try {
       const token = localStorage.getItem('access_token');
+      if (!token) {
+        toast({
+          title: "Authentication required",
+          description: "Please log in to delete projects",
+          variant: "destructive",
+        });
+        router.push('/auth/login');
+        return;
+      }
+
       await axios.delete(
         `${API_URL}/projects/${selectedProject.id}/`,
         {
           headers: {
             'Authorization': `Bearer ${token}`,
-          }
+            'Content-Type': 'application/json',
+          },
+          withCredentials: true
         }
       );
 
@@ -356,11 +404,23 @@ export function ProjectList({
       setIsDeleteOpen(false);
       setIsViewOpen(false);
       await fetchProjects();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error deleting project:', error);
+      let errorMessage = "Failed to delete project";
+
+      if (error.response) {
+        if (error.response.status === 403) {
+          errorMessage = "You don't have permission to delete this project";
+        } else if (error.response.data) {
+          errorMessage = error.response.data.detail || JSON.stringify(error.response.data);
+        }
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+
       toast({
         title: "Error",
-        description: "Failed to delete project. Please try again.",
+        description: errorMessage,
         variant: "destructive",
       });
     }
@@ -401,6 +461,10 @@ export function ProjectList({
         </Button>
       </div>
     );
+  }
+
+  function handleRemoveTeamMember(id: string) {
+    throw new Error('Function not implemented.');
   }
 
   return (
@@ -582,20 +646,14 @@ export function ProjectList({
             <>
               <DialogHeader>
                 <div className="flex justify-between items-center">
-                  <DialogTitle>
-                    {isEditing ? 'Edit Project' : selectedProject.title}
-                  </DialogTitle>
+                  <DialogTitle>{selectedProject.title}</DialogTitle>
                   <div className="flex space-x-2">
                     <Button
                       variant="outline"
                       size="sm"
                       onClick={() => {
-                        if (isEditing) {
-                          setIsEditing(false);
-                          setEditedProject({ ...selectedProject });
-                        } else {
-                          setIsEditing(true);
-                        }
+                        setEditedProject({ ...selectedProject });
+                        setIsEditing(!isEditing);
                       }}
                     >
                       <Edit className="h-4 w-4 mr-1" />
@@ -604,112 +662,222 @@ export function ProjectList({
                     <Button
                       variant="destructive"
                       size="sm"
-                      onClick={() => {
-                        setIsDeleteOpen(true);
-                      }}
+                      onClick={() => setIsDeleteOpen(true)}
                     >
                       <Trash2 className="h-4 w-4 mr-1" />
                       Delete
                     </Button>
                   </div>
                 </div>
-                <DialogDescription>
-                  {!isEditing && (
-                    <div className="mt-2">
-                      {getStatusBadge(selectedProject.status)}
-                      <p className="text-sm text-muted-foreground mt-2">
-                        {selectedProject.description}
-                      </p>
-                    </div>
-                  )}
+                <DialogDescription className="line-clamp-2">
+                  {selectedProject.description}
                 </DialogDescription>
               </DialogHeader>
 
-              <div className="grid gap-4 py-4">
-                {isEditing ? (
-                  <>
-                    <div className="grid grid-cols-4 items-center gap-4">
-                      <Label htmlFor="title" className="text-right">
-                        Title
-                      </Label>
+              {isEditing ? (
+                <div className="space-y-4">
+                  <div className="grid gap-4 py-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="title">Title</Label>
                       <Input
                         id="title"
                         value={editedProject.title || ''}
                         onChange={(e) => setEditedProject({ ...editedProject, title: e.target.value })}
-                        className="col-span-3"
                       />
                     </div>
-                    <div className="grid grid-cols-4 items-center gap-4">
-                      <Label htmlFor="description" className="text-right">
-                        Description
-                      </Label>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="description">Description</Label>
                       <Textarea
                         id="description"
                         value={editedProject.description || ''}
                         onChange={(e) => setEditedProject({ ...editedProject, description: e.target.value })}
-                        className="col-span-3"
                         rows={4}
                       />
                     </div>
-                    <div className="grid grid-cols-4 items-center gap-4">
-                      <Label htmlFor="status" className="text-right">
-                        Status
-                      </Label>
-                      <Select
-                        value={editedProject.status}
-                        onValueChange={(value) => setEditedProject({ ...editedProject, status: value as ProjectStatus })}
-                      >
-                        <SelectTrigger className="col-span-3">
-                          <SelectValue placeholder="Select status" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {PROJECT_STATUS_VALUES.map((status) => (
-                            <SelectItem key={status} value={status}>
-                              {status.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="status">Status</Label>
+                        <Select
+                          value={editedProject.status}
+                          onValueChange={(value) => setEditedProject({ ...editedProject, status: value as ProjectStatus })}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select status" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {PROJECT_STATUS_VALUES.map((status) => (
+                              <SelectItem key={status} value={status}>
+                                {status.replace('_', ' ').charAt(0).toUpperCase() + status.replace('_', ' ').slice(1)}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="progress">Progress (%)</Label>
+                        <Input
+                          id="progress"
+                          type="number"
+                          min="0"
+                          max="100"
+                          value={editedProject.progress || 0}
+                          onChange={(e) => setEditedProject({ ...editedProject, progress: Number(e.target.value) })}
+                        />
+                      </div>
                     </div>
-                  </>
-                ) : (
-                  <div className="space-y-4">
-                    <div className="flex items-center">
-                      <span className="font-medium w-32">Client:</span>
-                      <span>{selectedProject.client?.name || 'N/A'}</span>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="start_date">Start Date</Label>
+                        <Input
+                          id="start_date"
+                          type="date"
+                          value={editedProject.start_date ? editedProject.start_date.split('T')[0] : ''}
+                          onChange={(e) => setEditedProject({ ...editedProject, start_date: e.target.value })}
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="deadline">Deadline</Label>
+                        <Input
+                          id="deadline"
+                          type="date"
+                          value={editedProject.deadline ? editedProject.deadline.split('T')[0] : ''}
+                          onChange={(e) => setEditedProject({ ...editedProject, deadline: e.target.value })}
+                        />
+                      </div>
                     </div>
-                    <div className="flex items-center">
-                      <span className="font-medium w-32">Project Manager:</span>
-                      <span>
-                        {selectedProject.project_manager?.user?.name ||
-                          (selectedProject.project_manager?.user?.first_name || selectedProject.project_manager?.user?.last_name
-                            ? `${selectedProject.project_manager.user.first_name || ''} ${selectedProject.project_manager.user.last_name || ''}`.trim()
-                            : 'N/A')}
-                      </span>
-                    </div>
-                    <div className="flex items-center">
-                      <span className="font-medium w-32">Start Date:</span>
-                      <span>
-                        {selectedProject.start_date ? format(new Date(selectedProject.start_date), 'MMM d, yyyy') : 'N/A'}
-                      </span>
-                    </div>
-                    <div className="flex items-center">
-                      <span className="font-medium w-32">End Date:</span>
-                      <span>
-                        {selectedProject.end_date ? format(new Date(selectedProject.end_date), 'MMM d, yyyy') : 'N/A'}
-                      </span>
-                    </div>
-                    <div className="flex items-center">
-                      <span className="font-medium w-32">Budget:</span>
-                      <span>${selectedProject.budget?.toLocaleString() || selectedProject.cost.toLocaleString()}</span>
-                    </div>
-                    <div className="flex items-center">
-                      <span className="font-medium w-32">Team Members:</span>
-                      <span>{selectedProject.team_members?.length || 0}</span>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="budget">Budget ($)</Label>
+                        <Input
+                          id="budget"
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={editedProject.budget || editedProject.cost || 0}
+                          onChange={(e) => setEditedProject({ ...editedProject, budget: Number(e.target.value) })}
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="discount">Discount ($)</Label>
+                        <Input
+                          id="discount"
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={editedProject.discount || 0}
+                          onChange={(e) => setEditedProject({ ...editedProject, discount: Number(e.target.value) })}
+                        />
+                      </div>
                     </div>
                   </div>
-                )}
+                </div>
+              ) : (
+                <div className="grid gap-6 py-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <h4 className="text-sm font-medium text-muted-foreground mb-1">Status</h4>
+                      {getStatusBadge(selectedProject.status)}
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-medium text-muted-foreground mb-1">Progress</h4>
+                      <div className="flex items-center gap-2">
+                        <div className="w-full bg-gray-200 rounded-full h-2">
+                          <div
+                            className="bg-blue-600 h-2 rounded-full"
+                            style={{ width: `${selectedProject.progress || 0}%` }}
+                          ></div>
+                        </div>
+                        <span className="text-sm text-muted-foreground">{selectedProject.progress || 0}%</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <h4 className="text-sm font-medium text-muted-foreground mb-2">Timeline</h4>
+                    <div className="grid grid-cols-2 gap-4 text-sm">
+                      <div className="flex items-center gap-2">
+                        <Calendar className="h-4 w-4 text-muted-foreground" />
+                        <span>
+                          {selectedProject.start_date
+                            ? format(new Date(selectedProject.start_date), 'MMM d, yyyy')
+                            : 'Not started'}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Calendar className="h-4 w-4 text-muted-foreground" />
+                        <span>
+                          {selectedProject.deadline || selectedProject.end_date
+                            ? format(new Date(selectedProject.deadline || selectedProject.end_date!), 'MMM d, yyyy')
+                            : 'No deadline'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <h4 className="text-sm font-medium text-muted-foreground mb-1">Budget</h4>
+                      <div className="flex items-center gap-1">
+                        <DollarSign className="h-4 w-4 text-muted-foreground" />
+                        <span>${selectedProject.budget?.toLocaleString() || selectedProject.cost.toLocaleString()}</span>
+                      </div>
+                    </div>
+                    {selectedProject.discount && selectedProject.discount > 0 && (
+                      <div>
+                        <h4 className="text-sm font-medium text-muted-foreground mb-1">Discount</h4>
+                        <div className="text-green-500 flex items-center">
+                          <DollarSign className="h-4 w-4" />
+                          <span>{selectedProject.discount.toLocaleString()}</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+              {/* Team Members Section */}
+              <div>
+                <h4 className="text-sm font-medium text-muted-foreground pb-4">Team Members</h4>
+                <div className="border rounded-lg divide-y">
+                  {selectedProject.team_members?.length ? (
+                    selectedProject.team_members.map((member) => (
+                      <div key={member.id} className="flex items-center justify-between p-3 hover:bg-muted/50">
+                        <div className="flex items-center gap-3">
+                          <Avatar className="h-8 w-8">
+                            <AvatarImage src={member.avatar || ''} alt={member.name} />
+                            <AvatarFallback>
+                              {member.name?.split(' ').map(n => n[0]).join('').toUpperCase()}
+                            </AvatarFallback>
+                          </Avatar>
+                          <span className="text-sm font-medium">{member.name}</span>
+                        </div>
+                        {/* <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleRemoveTeamMember(member.id);
+                              }}
+                            >
+                              <X className="h-4 w-4" />
+                            </Button> */}
+                      </div>
+                    ))
+                  ) : (
+                    <div className="p-4 text-center text-sm text-muted-foreground">
+                      No team members added yet
+                    </div>
+                  )}
+                </div>
               </div>
+
 
               {isEditing && (
                 <DialogFooter>

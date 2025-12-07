@@ -792,6 +792,9 @@ export const fetchOrganizations = async ({
   totalPages: number;
 }> => {
   try {
+    // Get the access token from localStorage
+    const token = localStorage.getItem('access_token');
+    
     const params = new URLSearchParams({
       page: page.toString(),
       page_size: pageSize.toString(),
@@ -800,132 +803,64 @@ export const fetchOrganizations = async ({
       ordering: `${sortOrder === 'desc' ? '-' : ''}${sortBy}`,
     });
 
-    // The endpoint is /api/v1/org/organizations/ as per backend URL configuration
-    const response = await apiGet<{
-      count: number;
-      next: string | null;
-      previous: string | null;
-      results: Array<{
-        id: string;
-        name: string;
-        status: string;
-        plan: string;
-        member_count: number;
-        storage_used: number;
-        storage_limit: number;
-        last_active: string;
-        owner: string;
-        created_at: string;
-        updated_at: string;
-        is_active: boolean;
-        slug: string;
-        subscription?: {
-          id: number;
-          plan_details: {
-            plan: {
-              id: number;
-              name: string;
-              description: string;
-            };
-            duration: {
-              months: number;
-              price: number;
-              discount_percentage: number;
-            };
-          };
-          start_date: string;
-          end_date: string;
-          is_active: boolean;
-          auto_renew: boolean;
-        };
-      }>;
-    }>(`/org/organizations/?${params.toString()}`);
-
     // Define the API response organization type
     interface ApiOrganization {
       id: string;
       name: string;
-      slug?: string;
-      status?: string;
-      plan?: string;
+      slug: string;
+      is_active: boolean;
+      created_at: string;
+      updated_at: string;
+      status?: OrganizationStatus;
+      plan?: BillingPlan;
       member_count?: number;
       storage_used?: number;
       storage_limit?: number;
       last_active?: string;
       owner?: string;
-      created_at?: string;
-      updated_at?: string;
-      is_active?: boolean;
       members_count?: number;
       projects_count?: number;
     }
 
+    // Include the token in the request headers
+    const response = await apiGet<{
+      count: number;
+      next: string | null;
+      previous: string | null;
+      results: ApiOrganization[];
+    }>(`/org/organizations/?${params.toString()}`, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      }
+    });
+
     // Map the API response to the Organization type
-    const organizations: Organization[] = response.results.map((org) => {
-      // Create a new object with all the required fields
+    const organizations: Organization[] = response.results.map((org: ApiOrganization) => {
       const organization: Organization = {
         id: org.id,
         name: org.name,
-        slug: org.slug || org.name.toLowerCase().replace(/\s+/g, '-'),
-        is_active: org.is_active !== undefined ? org.is_active : true,
-        created_at: org.created_at || new Date().toISOString(),
-        updated_at: org.updated_at || new Date().toISOString(),
-        // These properties come from the API response but might be undefined
-        members_count: org.member_count || 0,
-        projects_count: 0, // Default to 0 if not provided
-        status: (org.status as OrganizationStatus) || OrganizationStatus.INACTIVE,
-        plan: (org.plan as BillingPlan) || BillingPlan.FREE,
+        slug: org.slug,
+        is_active: org.is_active,
+        created_at: org.created_at,
+        updated_at: org.updated_at,
+        status: org.status || OrganizationStatus.INACTIVE,
+        plan: org.plan || BillingPlan.FREE,
         member_count: org.member_count || 0,
         storage_used: org.storage_used || 0,
         storage_limit: org.storage_limit || 0,
         last_active: org.last_active || new Date().toISOString(),
         owner: org.owner || '',
-        // Include subscription data if available
-        subscription: org.subscription ? {
-          id: org.subscription.id,
-          plan_details: {
-            plan: {
-              id: org.subscription.plan_details.plan.id,
-              name: org.subscription.plan_details.plan.name,
-              description: org.subscription.plan_details.plan.description
-            },
-            duration: {
-              months: org.subscription.plan_details.duration.months,
-              price: org.subscription.plan_details.duration.price,
-              discount_percentage: org.subscription.plan_details.duration.discount_percentage
-            }
-          },
-          start_date: org.subscription.start_date,
-          end_date: org.subscription.end_date,
-          is_active: org.subscription.is_active,
-          auto_renew: org.subscription.auto_renew
-        } : undefined,
-        // Set data to a copy of the org data without the data property
-        data: {
-          id: org.id,
-          name: org.name,
-          slug: org.slug || org.name.toLowerCase().replace(/\s+/g, '-'),
-          is_active: org.is_active !== undefined ? org.is_active : true,
-          created_at: org.created_at || new Date().toISOString(),
-          updated_at: org.updated_at || new Date().toISOString(),
-          status: (org.status as OrganizationStatus) || OrganizationStatus.INACTIVE,
-          plan: (org.plan as BillingPlan) || BillingPlan.FREE,
-          member_count: org.member_count || 0,
-          storage_used: org.storage_used || 0,
-          storage_limit: org.storage_limit || 0,
-          last_active: org.last_active || new Date().toISOString(),
-          owner: org.owner || ''
-        }
       };
-      
+
       return organization;
     });
 
     return {
       organizations,
       total: response.count,
-      page: page,
-      pageSize: pageSize,
+      page,
+      pageSize,
       totalPages: Math.ceil(response.count / pageSize),
     };
   } catch (error) {

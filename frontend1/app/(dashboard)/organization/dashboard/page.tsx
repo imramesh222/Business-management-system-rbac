@@ -479,7 +479,7 @@ export default function OrganizationDashboard() {
                 Welcome back, {organizationInfo.admin.name}!
               </p>
             </div>
-            <div className="flex space-x-3">
+            {/* <div className="flex space-x-3">
               <Button variant="outline" size="sm">
                 <Settings className="h-4 w-4 mr-2" />
                 Settings
@@ -488,7 +488,7 @@ export default function OrganizationDashboard() {
                 <Bell className="h-4 w-4 mr-2" />
                 Notifications
               </Button>
-            </div>
+            </div> */}
           </div>
         </div>
       )}

@@ -1,5 +1,6 @@
 'use client';
 
+import api from '@/services/apiService';
 import { createContext, useContext, ReactNode, useState, useEffect } from 'react';
 
 export interface Organization {
@@ -26,30 +27,22 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
   // Load user's organizations on mount
   useEffect(() => {
     const fetchOrganizations = async () => {
-      try {
-        setLoading(true);
-        // Replace with your actual API call to fetch user's organizations
-        // const response = await apiGet('/organizations/');
-        // setOrganizations(response.data);
-        
-        // For now, using mock data
-        const mockOrgs: Organization[] = [
-          { id: '1', name: 'Acme Inc', slug: 'acme-inc' },
-          { id: '2', name: 'Tech Corp', slug: 'tech-corp' },
-        ];
-        
-        setOrganizations(mockOrgs);
-        
-        // Set the first organization as default if none is selected
-        if (mockOrgs.length > 0 && !currentOrganization) {
-          setCurrentOrganization(mockOrgs[0]);
-        }
-      } catch (error) {
-        console.error('Failed to fetch organizations:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
+  try {
+    setLoading(true);
+    const response = await api.get('/org/organizations/');
+    const orgs = response.data?.results || response.data || [];
+    
+    setOrganizations(orgs);
+    
+    if (orgs.length > 0 && !currentOrganization) {
+      setCurrentOrganization(orgs[0]);
+    }
+  } catch (error) {
+    console.error('Failed to fetch organizations:', error);
+  } finally {
+    setLoading(false);
+  }
+};
 
     fetchOrganizations();
   }, []);

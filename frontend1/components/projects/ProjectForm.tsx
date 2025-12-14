@@ -670,7 +670,7 @@ export function ProjectForm({
           </Button>
 
           {/* Debug button */}
-          <button
+          {/* <button
             type="button"
             className="text-xs text-gray-500 mt-2 block"
             onClick={() => {
@@ -685,7 +685,7 @@ export function ProjectForm({
             }}
           >
             Debug Form State
-          </button>
+          </button> */}
         </div>
       </form>
     </div>

@@ -167,7 +167,7 @@ export default function ProjectKPage() {
             The Complete Solution for Your Business
           </h1>
           <p className="text-xl text-muted-foreground max-w-3xl mx-auto mb-10">
-            Choose the perfect plan for your needs. Start with a free trial or select a paid plan for more features.
+            Select a paid plan for more features.
           </p>
           
           <div className="flex justify-center space-x-4 mb-16">

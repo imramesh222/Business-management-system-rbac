@@ -58,12 +58,12 @@ const getNavigationForRole = (role: UserRole) => {
       icon: Home, 
       current: false 
     },
-    { 
+    ...(role !== 'superadmin' ? [{
       name: 'Messages', 
       href: '/organization/messaging', 
       icon: MessageSquare, 
       current: false 
-    },
+    }] : []),
   ];
 
   // Add a default empty array for any role not explicitly defined

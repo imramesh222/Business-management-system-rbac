@@ -144,111 +144,113 @@ export function SystemHealthSection() {
   };
 
   return (
-    <Card className="w-full">
-      <CardHeader className="flex flex-row items-center justify-between pb-2">
-        <CardTitle className="text-lg font-medium">System Health</CardTitle>
-        <div className="flex items-center space-x-2">
-          {lastUpdated && (
-            <span className="text-xs text-muted-foreground">
-              Updated: {new Date(lastUpdated).toLocaleTimeString()}
-            </span>
-          )}
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={handleRefresh}
-            disabled={isLoading}
-            className="h-8 w-8 p-0"
-          >
-            <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
-            <span className="sr-only">Refresh</span>
-          </Button>
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-6">
-        <div>
-          <h3 className="mb-4 text-sm font-medium">System Metrics</h3>
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-            {metrics.map((metric) => (
-              <div key={metric.name} className="flex items-center space-x-4 rounded-lg border p-4">
-                <div className="flex-shrink-0">
-                  <div className="rounded-full bg-opacity-20 p-2">
-                    {metric.icon}
-                  </div>
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium text-muted-foreground">{metric.name}</p>
-                  <div className="flex items-baseline">
-                    <p className="text-2xl font-bold">
-                      {metric.value}{metric.unit}
-                    </p>
-                    {metric.trend === 'up' && (
-                      <span className="ml-2 text-sm text-red-500">↑ 2.1%</span>
-                    )}
-                    {metric.trend === 'down' && (
-                      <span className="ml-2 text-sm text-green-500">↓ 1.3%</span>
-                    )}
-                  </div>
-                  <div className="mt-2">
-                    <Progress
-                      value={metric.value}
-                      max={metric.max}
-                      className={`h-2 [&>div]:${metric.trend === 'up' ? 'bg-red-500' : metric.trend === 'down' ? 'bg-green-500' : 'bg-blue-500'}`}
-                    />
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
+    // <Card className="w-full">
+    //   <CardHeader className="flex flex-row items-center justify-between pb-2">
+    //     <CardTitle className="text-lg font-medium">System Health</CardTitle>
+    //     <div className="flex items-center space-x-2">
+    //       {lastUpdated && (
+    //         <span className="text-xs text-muted-foreground">
+    //           Updated: {new Date(lastUpdated).toLocaleTimeString()}
+    //         </span>
+    //       )}
+    //       <Button
+    //         variant="ghost"
+    //         size="sm"
+    //         onClick={handleRefresh}
+    //         disabled={isLoading}
+    //         className="h-8 w-8 p-0"
+    //       >
+    //         <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
+    //         <span className="sr-only">Refresh</span>
+    //       </Button>
+    //     </div>
+    //   </CardHeader>
+    //   <CardContent className="space-y-6">
+    //     <div>
+    //       <h3 className="mb-4 text-sm font-medium">System Metrics</h3>
+    //       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+    //         {metrics.map((metric) => (
+    //           <div key={metric.name} className="flex items-center space-x-4 rounded-lg border p-4">
+    //             <div className="flex-shrink-0">
+    //               <div className="rounded-full bg-opacity-20 p-2">
+    //                 {metric.icon}
+    //               </div>
+    //             </div>
+    //             <div className="min-w-0 flex-1">
+    //               <p className="text-sm font-medium text-muted-foreground">{metric.name}</p>
+    //               <div className="flex items-baseline">
+    //                 <p className="text-2xl font-bold">
+    //                   {metric.value}{metric.unit}
+    //                 </p>
+    //                 {metric.trend === 'up' && (
+    //                   <span className="ml-2 text-sm text-red-500">↑ 2.1%</span>
+    //                 )}
+    //                 {metric.trend === 'down' && (
+    //                   <span className="ml-2 text-sm text-green-500">↓ 1.3%</span>
+    //                 )}
+    //               </div>
+    //               <div className="mt-2">
+    //                 <Progress
+    //                   value={metric.value}
+    //                   max={metric.max}
+    //                   className={`h-2 [&>div]:${metric.trend === 'up' ? 'bg-red-500' : metric.trend === 'down' ? 'bg-green-500' : 'bg-blue-500'}`}
+    //                 />
+    //               </div>
+    //             </div>
+    //           </div>
+    //         ))}
+    //       </div>
+    //     </div>
 
-        <div>
-          <h3 className="mb-4 text-sm font-medium">Server Status</h3>
-          <div className="overflow-hidden rounded-md border">
-            <table className="w-full">
-              <thead className="bg-muted/50">
-                <tr>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Server</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Status</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Response Time</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Uptime</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Last Checked</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {servers.map((server) => (
-                  <tr key={server.name}>
-                    <td className="whitespace-nowrap px-4 py-4">
-                      <div className="flex items-center">
-                        <div className="flex-shrink-0">
-                          <Server className="h-5 w-5 text-muted-foreground" />
-                        </div>
-                        <div className="ml-4">
-                          <div className="text-sm font-medium">{server.name}</div>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="whitespace-nowrap px-4 py-4">
-                      <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${getStatusColor(server.status)}`}>
-                        {server.status.charAt(0).toUpperCase() + server.status.slice(1)}
-                      </span>
-                    </td>
-                    <td className="whitespace-nowrap px-4 py-4 text-sm">
-                      {server.responseTime}ms
-                    </td>
-                    <td className="whitespace-nowrap px-4 py-4 text-sm">
-                      {server.uptime.toFixed(2)}%
-                    </td>
-                    <td className="whitespace-nowrap px-4 py-4 text-sm text-muted-foreground">
-                      {new Date(server.lastChecked).toLocaleTimeString()}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </CardContent>
-    </Card>
+    //     <div>
+    //       <h3 className="mb-4 text-sm font-medium">Server Status</h3>
+    //       <div className="overflow-hidden rounded-md border">
+    //         <table className="w-full">
+    //           <thead className="bg-muted/50">
+    //             <tr>
+    //               <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Server</th>
+    //               <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Status</th>
+    //               <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Response Time</th>
+    //               <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Uptime</th>
+    //               <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Last Checked</th>
+    //             </tr>
+    //           </thead>
+    //           <tbody className="divide-y divide-border">
+    //             {servers.map((server) => (
+    //               <tr key={server.name}>
+    //                 <td className="whitespace-nowrap px-4 py-4">
+    //                   <div className="flex items-center">
+    //                     <div className="flex-shrink-0">
+    //                       <Server className="h-5 w-5 text-muted-foreground" />
+    //                     </div>
+    //                     <div className="ml-4">
+    //                       <div className="text-sm font-medium">{server.name}</div>
+    //                     </div>
+    //                   </div>
+    //                 </td>
+    //                 <td className="whitespace-nowrap px-4 py-4">
+    //                   <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${getStatusColor(server.status)}`}>
+    //                     {server.status.charAt(0).toUpperCase() + server.status.slice(1)}
+    //                   </span>
+    //                 </td>
+    //                 <td className="whitespace-nowrap px-4 py-4 text-sm">
+    //                   {server.responseTime}ms
+    //                 </td>
+    //                 <td className="whitespace-nowrap px-4 py-4 text-sm">
+    //                   {server.uptime.toFixed(2)}%
+    //                 </td>
+    //                 <td className="whitespace-nowrap px-4 py-4 text-sm text-muted-foreground">
+    //                   {new Date(server.lastChecked).toLocaleTimeString()}
+    //                 </td>
+    //               </tr>
+    //             ))}
+    //           </tbody>
+    //         </table>
+    //       </div>
+    //     </div>
+    //   </CardContent>
+    // </Card>
+    <>
+    </>
   );
 }

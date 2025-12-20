@@ -407,14 +407,7 @@ function SuperAdminOverview() {
         change: `${metrics.monthlyRevenue > 0 ? '+' : ''}${formatCurrency(metrics.monthlyRevenue)} this month`,
         changeType: metrics.monthlyRevenue > 0 ? 'positive' : metrics.monthlyRevenue < 0 ? 'negative' : 'neutral',
         icon: DollarSign,
-      },
-      {
-        title: 'Active Projects',
-        value: formatNumber(metrics.activeProjects),
-        icon: FolderOpen,
-        change: `${metrics.projectCompletionRate || 0}% completed`,
-        changeType: metrics.projectCompletionRate > 70 ? 'positive' : metrics.projectCompletionRate < 30 ? 'negative' : 'neutral'
-      },
+      }
     ];
     
     return cards;
@@ -707,7 +700,7 @@ function SuperAdminOverview() {
       </div>
 
       {/* Recent Activities */}
-      <Card>
+      {/* <Card>
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between">
             <div>
@@ -801,7 +794,7 @@ function SuperAdminOverview() {
             )}
           </div>
         </CardContent>
-      </Card>
+      </Card> */}
 
       {/* Section Components - These are now self-contained with their own data fetching */}
       <div className="space-y-6">

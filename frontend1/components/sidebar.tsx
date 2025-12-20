@@ -34,12 +34,12 @@ export function Sidebar({ user }: SidebarProps) {
       icon: LayoutDashboard,
       match: (path: string) => path === '/organization/overview' 
     },
-    { 
-      name: 'Profile', 
-      href: '/organization/profile', 
-      icon: UserIcon,
-      match: (path: string) => path === '/organization/profile' || path === '/profile'
-    }
+    // { 
+    //   name: 'Profile', 
+    //   href: '/organization/profile', 
+    //   icon: UserIcon,
+    //   match: (path: string) => path === '/organization/profile' || path === '/profile'
+    // }
   ];
 
   // Role-specific navigation items
@@ -53,35 +53,30 @@ export function Sidebar({ user }: SidebarProps) {
         match: (path: string) => path.startsWith('/organization/project/projects')
       },
       { 
-        name: 'Tasks', 
-        href: '/organization/project/tasks', 
-        icon: ClipboardList,
-        match: (path: string) => path.startsWith('/organization/project/tasks')
-      },
-      { 
-        name: 'Team', 
-        href: '/organization/project/team', 
-        icon: Users,
-        match: (path: string) => path.startsWith('/organization/project/team')
-      },
-      { 
-        name: 'Reports', 
-        href: '/organization/project/reports', 
-        icon: BarChart2,
-        match: (path: string) => path.startsWith('/organization/project/reports')
-      },
-      { 
         name: 'Messaging', 
         href: '/organization/project/messaging', 
         icon: MessageSquare,
         match: (path: string) => path.startsWith('/organization/project/messaging')
       },
       { 
-        name: 'Settings', 
-        href: '/organization/project/settings', 
-        icon: Settings,
-        match: (path: string) => path.startsWith('/organization/project/settings')
-      }
+        name: 'Tasks', 
+        href: '/organization/project/tasks', 
+        icon: ClipboardList,
+        match: (path: string) => path.startsWith('/organization/project/tasks')
+      },
+      // { 
+      //   name: 'Team', 
+      //   href: '/organization/project/team', 
+      //   icon: Users,
+      //   match: (path: string) => path.startsWith('/organization/project/team')
+      // }
+      // { 
+      //   name: 'Reports', 
+      //   href: '/organization/project/reports', 
+      //   icon: BarChart2,
+      //   match: (path: string) => path.startsWith('/organization/project/reports')
+      // },
+      
     ],
     // Developer
     developer: [

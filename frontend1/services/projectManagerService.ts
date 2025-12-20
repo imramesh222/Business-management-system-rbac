@@ -189,7 +189,7 @@ export const fetchTasks = async (): Promise<Task[]> => {
       return [
         {
           id: '1',
-          title: 'Sample Task 1',
+          title: 'Task 1',
           description: 'This is a sample task',
           status: 'todo',
           priority: 'medium',

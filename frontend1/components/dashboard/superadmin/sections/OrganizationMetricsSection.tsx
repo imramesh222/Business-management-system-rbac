@@ -206,187 +206,189 @@ export function OrganizationMetricsSection() {
   }
 
   return (
-    <Card className="w-full">
-      <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between pb-2 space-y-2 sm:space-y-0">
-        <div>
-          <CardTitle>Organization Metrics</CardTitle>
-          <CardDescription>
-            Overview of all organizations in the system
-            {lastUpdated && (
-              <span className="text-xs text-muted-foreground ml-2">
-                (Updated: {new Date(lastUpdated).toLocaleTimeString()})
-              </span>
-            )}
-          </CardDescription>
-        </div>
-        <div className="flex items-center space-x-2">
-          <div className="flex items-center space-x-1">
-            <Button
-              variant={timeRange === '7d' ? 'default' : 'ghost'}
-              size="sm"
-              onClick={() => setTimeRange('7d')}
-              className="h-8 px-2 text-xs"
-            >
-              7D
-            </Button>
-            <Button
-              variant={timeRange === '30d' ? 'default' : 'ghost'}
-              size="sm"
-              onClick={() => setTimeRange('30d')}
-              className="h-8 px-2 text-xs"
-            >
-              30D
-            </Button>
-            <Button
-              variant={timeRange === '90d' ? 'default' : 'ghost'}
-              size="sm"
-              onClick={() => setTimeRange('90d')}
-              className="h-8 px-2 text-xs"
-            >
-              90D
-            </Button>
-          </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={handleRefresh}
-            disabled={isLoading}
-            className="h-8 w-8 p-0"
-          >
-            <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
-            <span className="sr-only">Refresh</span>
-          </Button>
-        </div>
-      </CardHeader>
+    // <Card className="w-full">
+    //   <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between pb-2 space-y-2 sm:space-y-0">
+    //     <div>
+    //       <CardTitle>Organization Metrics</CardTitle>
+    //       <CardDescription>
+    //         Overview of all organizations in the system
+    //         {lastUpdated && (
+    //           <span className="text-xs text-muted-foreground ml-2">
+    //             (Updated: {new Date(lastUpdated).toLocaleTimeString()})
+    //           </span>
+    //         )}
+    //       </CardDescription>
+    //     </div>
+    //     <div className="flex items-center space-x-2">
+    //       <div className="flex items-center space-x-1">
+    //         <Button
+    //           variant={timeRange === '7d' ? 'default' : 'ghost'}
+    //           size="sm"
+    //           onClick={() => setTimeRange('7d')}
+    //           className="h-8 px-2 text-xs"
+    //         >
+    //           7D
+    //         </Button>
+    //         <Button
+    //           variant={timeRange === '30d' ? 'default' : 'ghost'}
+    //           size="sm"
+    //           onClick={() => setTimeRange('30d')}
+    //           className="h-8 px-2 text-xs"
+    //         >
+    //           30D
+    //         </Button>
+    //         <Button
+    //           variant={timeRange === '90d' ? 'default' : 'ghost'}
+    //           size="sm"
+    //           onClick={() => setTimeRange('90d')}
+    //           className="h-8 px-2 text-xs"
+    //         >
+    //           90D
+    //         </Button>
+    //       </div>
+    //       <Button
+    //         variant="ghost"
+    //         size="sm"
+    //         onClick={handleRefresh}
+    //         disabled={isLoading}
+    //         className="h-8 w-8 p-0"
+    //       >
+    //         <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
+    //         <span className="sr-only">Refresh</span>
+    //       </Button>
+    //     </div>
+    //   </CardHeader>
       
-      <CardContent className="space-y-6">
-        {/* Key Metrics */}
-        {stats && (
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Total Organizations</CardTitle>
-                <Building2 className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{stats.total.toLocaleString()}</div>
-                <div className="flex items-center text-xs text-muted-foreground">
-                  {stats.growthRate >= 0 ? (
-                    <ArrowUpRight className="h-3 w-3 text-green-500 mr-1" />
-                  ) : (
-                    <ArrowDownRight className="h-3 w-3 text-red-500 mr-1" />
-                  )}
-                  {Math.abs(stats.growthRate)}% from last month
-                </div>
-              </CardContent>
-            </Card>
+    //   <CardContent className="space-y-6">
+    //     {/* Key Metrics */}
+    //     {stats && (
+    //       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+    //         <Card>
+    //           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+    //             <CardTitle className="text-sm font-medium">Total Organizations</CardTitle>
+    //             <Building2 className="h-4 w-4 text-muted-foreground" />
+    //           </CardHeader>
+    //           <CardContent>
+    //             <div className="text-2xl font-bold">{stats.total.toLocaleString()}</div>
+    //             <div className="flex items-center text-xs text-muted-foreground">
+    //               {stats.growthRate >= 0 ? (
+    //                 <ArrowUpRight className="h-3 w-3 text-green-500 mr-1" />
+    //               ) : (
+    //                 <ArrowDownRight className="h-3 w-3 text-red-500 mr-1" />
+    //               )}
+    //               {Math.abs(stats.growthRate)}% from last month
+    //             </div>
+    //           </CardContent>
+    //         </Card>
             
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Active Organizations</CardTitle>
-                <Users className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{stats.active}</div>
-                <p className="text-xs text-muted-foreground">
-                  {stats.trial} in trial, {stats.inactive} inactive
-                </p>
-              </CardContent>
-            </Card>
+    //         <Card>
+    //           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+    //             <CardTitle className="text-sm font-medium">Active Organizations</CardTitle>
+    //             <Users className="h-4 w-4 text-muted-foreground" />
+    //           </CardHeader>
+    //           <CardContent>
+    //             <div className="text-2xl font-bold">{stats.active}</div>
+    //             <p className="text-xs text-muted-foreground">
+    //               {stats.trial} in trial, {stats.inactive} inactive
+    //             </p>
+    //           </CardContent>
+    //         </Card>
             
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Total Users</CardTitle>
-                <Users className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{stats.totalUsers.toLocaleString()}</div>
-                <p className="text-xs text-muted-foreground">
-                  ~{stats.avgUsersPerOrg.toFixed(1)} users per org
-                </p>
-              </CardContent>
-            </Card>
+    //         <Card>
+    //           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+    //             <CardTitle className="text-sm font-medium">Total Users</CardTitle>
+    //             <Users className="h-4 w-4 text-muted-foreground" />
+    //           </CardHeader>
+    //           <CardContent>
+    //             <div className="text-2xl font-bold">{stats.totalUsers.toLocaleString()}</div>
+    //             <p className="text-xs text-muted-foreground">
+    //               ~{stats.avgUsersPerOrg.toFixed(1)} users per org
+    //             </p>
+    //           </CardContent>
+    //         </Card>
             
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Storage Used</CardTitle>
-                <HardDrive className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{formatBytes(stats.storageUsed * 1024 * 1024)}</div>
-                <p className="text-xs text-muted-foreground">
-                  {((stats.storageUsed / stats.storageLimit) * 100).toFixed(1)}% of {formatBytes(stats.storageLimit * 1024 * 1024)} limit
-                </p>
-              </CardContent>
-            </Card>
-          </div>
-        )}
+    //         <Card>
+    //           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+    //             <CardTitle className="text-sm font-medium">Storage Used</CardTitle>
+    //             <HardDrive className="h-4 w-4 text-muted-foreground" />
+    //           </CardHeader>
+    //           <CardContent>
+    //             <div className="text-2xl font-bold">{formatBytes(stats.storageUsed * 1024 * 1024)}</div>
+    //             <p className="text-xs text-muted-foreground">
+    //               {((stats.storageUsed / stats.storageLimit) * 100).toFixed(1)}% of {formatBytes(stats.storageLimit * 1024 * 1024)} limit
+    //             </p>
+    //           </CardContent>
+    //         </Card>
+    //       </div>
+    //     )}
 
-        {/* Growth Chart */}
-        <div className="rounded-lg border p-4">
-          <h3 className="mb-4 text-sm font-medium">Organization Growth</h3>
-          <div className="h-64 w-full">
-            <Bar data={orgChartData} options={chartOptions} />
-          </div>
-        </div>
+    //     {/* Growth Chart */}
+    //     <div className="rounded-lg border p-4">
+    //       <h3 className="mb-4 text-sm font-medium">Organization Growth</h3>
+    //       <div className="h-64 w-full">
+    //         <Bar data={orgChartData} options={chartOptions} />
+    //       </div>
+    //     </div>
 
-        {/* Top Organizations */}
-        <div className="grid gap-6 md:grid-cols-2">
-          <div className="rounded-lg border p-4">
-            <h3 className="mb-4 text-sm font-medium">Top Organizations</h3>
-            <div className="space-y-4">
-              {topOrgs.map((org) => (
-                <div key={org.name} className="flex items-center justify-between">
-                  <div className="flex items-center space-x-3">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-muted">
-                      <Building2 className="h-5 w-5" />
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium">{org.name}</p>
-                      <div className="flex items-center space-x-2 text-xs text-muted-foreground">
-                        <span>{org.users} users</span>
-                        <span>•</span>
-                        <span>{org.projects} projects</span>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    {getStatusBadge(org.status)}
-                    <p className="text-xs text-muted-foreground">
-                      Last active: {new Date(org.lastActive).toLocaleDateString()}
-                    </p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
+    //     {/* Top Organizations */}
+    //     <div className="grid gap-6 md:grid-cols-2">
+    //       <div className="rounded-lg border p-4">
+    //         <h3 className="mb-4 text-sm font-medium">Top Organizations</h3>
+    //         <div className="space-y-4">
+    //           {topOrgs.map((org) => (
+    //             <div key={org.name} className="flex items-center justify-between">
+    //               <div className="flex items-center space-x-3">
+    //                 <div className="flex h-10 w-10 items-center justify-center rounded-full bg-muted">
+    //                   <Building2 className="h-5 w-5" />
+    //                 </div>
+    //                 <div>
+    //                   <p className="text-sm font-medium">{org.name}</p>
+    //                   <div className="flex items-center space-x-2 text-xs text-muted-foreground">
+    //                     <span>{org.users} users</span>
+    //                     <span>•</span>
+    //                     <span>{org.projects} projects</span>
+    //                   </div>
+    //                 </div>
+    //               </div>
+    //               <div className="text-right">
+    //                 {getStatusBadge(org.status)}
+    //                 <p className="text-xs text-muted-foreground">
+    //                   Last active: {new Date(org.lastActive).toLocaleDateString()}
+    //                 </p>
+    //               </div>
+    //             </div>
+    //           ))}
+    //         </div>
+    //       </div>
 
-          {/* Storage Usage */}
-          <div className="rounded-lg border p-4">
-            <h3 className="mb-4 text-sm font-medium">Storage Usage</h3>
-            <div className="space-y-4">
-              {storageUsage.map((org) => (
-                <div key={org.orgName}>
-                  <div className="mb-1 flex items-center justify-between text-sm">
-                    <span className="font-medium">{org.orgName}</span>
-                    <span className="text-muted-foreground">
-                      {formatBytes(org.used * 1024 * 1024)} / {formatBytes(org.limit * 1024 * 1024)}
-                    </span>
-                  </div>
-                  <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
-                    <div
-                      className={`h-full ${
-                        org.percentage > 80 ? 'bg-red-500' : org.percentage > 60 ? 'bg-yellow-500' : 'bg-green-500'
-                      }`}
-                      style={{ width: `${org.percentage}%` }}
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </CardContent>
-    </Card>
+    //       {/* Storage Usage */}
+    //       <div className="rounded-lg border p-4">
+    //         <h3 className="mb-4 text-sm font-medium">Storage Usage</h3>
+    //         <div className="space-y-4">
+    //           {storageUsage.map((org) => (
+    //             <div key={org.orgName}>
+    //               <div className="mb-1 flex items-center justify-between text-sm">
+    //                 <span className="font-medium">{org.orgName}</span>
+    //                 <span className="text-muted-foreground">
+    //                   {formatBytes(org.used * 1024 * 1024)} / {formatBytes(org.limit * 1024 * 1024)}
+    //                 </span>
+    //               </div>
+    //               <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+    //                 <div
+    //                   className={`h-full ${
+    //                     org.percentage > 80 ? 'bg-red-500' : org.percentage > 60 ? 'bg-yellow-500' : 'bg-green-500'
+    //                   }`}
+    //                   style={{ width: `${org.percentage}%` }}
+    //                 />
+    //               </div>
+    //             </div>
+    //           ))}
+    //         </div>
+    //       </div>
+    //     </div>
+    //   </CardContent>
+    // </Card>
+    <>
+    </>
   );
 }
